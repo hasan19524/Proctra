@@ -98,7 +98,7 @@ Rule from the spec: every phase runs `make check` before it is considered done.
 | Phase | Status |
 |---|---|
 | 0 — Architecture & foundation | ✅ done |
-| 1 — Design system | ⬜ not started |
+| 1 — Design system | 🔨 in progress — awaiting owner approval |
 | 2 — Authentication | ⬜ |
 | 3 — Procto Home | ⬜ |
 | 4 — Create meeting | ⬜ |

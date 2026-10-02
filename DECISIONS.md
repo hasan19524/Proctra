@@ -121,7 +121,7 @@ placeholders and extension points only.
 
 ---
 
-## D10 � Local port allocation (coexistence with other projects)
+## D10 � Local port allocation (coexistence with other projects)
 
 **Context.** This development machine also runs other projects (e.g. one using host
 ports 3000 and 8000 for its own web app and API, and a Postgres on 5433). Procto must
@@ -142,3 +142,29 @@ Wired into: `docker-compose.yml`, `.env.example`, `frontend` dev scripts, `Makef
 
 **Consequences.** Procto runs side by side with other stacks without port fights.
 Production deployments are unaffected (ports come from environment configuration).
+
+---
+
+## D11 — UI follows the Google Meet reference (layout only)
+
+**Context.** The project owner supplied `reference/` (four Google Meet screenshots)
+and directed that Procto's UI must *look like Google Meet* while keeping the already
+decided features, tokens and brand.
+
+**Decision.** Meet is the **layout/chrome/pattern reference**, not a visual clone:
+
+- Adopted: home shell (join-code pill, green New CTA, icon rail, date/week strip,
+  centered empty state), in-call shell (top bar, featured tile + filmstrip, overlaid
+  tile chips, floating pill control dock, bottom-right utility cluster, right-side
+  People/Chat panels, emoji reaction bar above the dock).
+- Kept: indigo primary, our full token set (incl. `success`/`warning`/`info`),
+  Lexend display + Source Sans 3 body, semantic-status rules, all Phase 1 component
+  and accessibility requirements.
+- Emojis appear only as reaction content, never as UI icons (per DESIGN.md §8).
+
+Recorded in `DESIGN.md` §9 with a per-surface mapping table.
+
+**Consequences.** Screens read as "familiar meeting UI" with Procto branding.
+Palette stays indigo-tinted (we did not adopt Google's neutral grays) — revisit only
+if the owner asks for a closer color match. Reactions UI ships as visual-only until
+Phase 10 (open question in the Phase 1 report).

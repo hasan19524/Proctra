@@ -1,0 +1,82 @@
+# Procto — local development infrastructure.
+#
+# Policy (see DECISIONS.md D3): ONLY infrastructure runs in Docker here.
+# The FastAPI backend and Next.js frontend run natively with hot reload (`make dev`).
+# `make dev-full` runs the applications in containers as well.
+
+name: procto
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-procto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-procto}
+      POSTGRES_DB: ${POSTGRES_DB:-procto}
+    ports:
+      - "5434:5432"    # host 5434 -> avoids clashing with other local Postgres instances
+    volumes:
+      - procto-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-procto} -d $${POSTGRES_DB:-procto}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"    # host 6380 -> avoids clashing with other local Redis instances
+    volumes:
+      - procto-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # LiveKit SFU — media only. Application events go through the FastAPI WebSocket.
+  # The API key/secret below MUST match `keys:` in livekit/livekit.yaml and the
+  # LIVEKIT_API_KEY / LIVEKIT_API_SECRET values in .env
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    ports:
+      - "7880:7880"    # HTTP / API / token verification
+      - "7881:7881"    # RTC over TCP
+      - "50000-50099:50000-50099/udp"   # WebRTC media (UDP)
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit/livekit.yaml:ro
+
+  # ------------------------------------------------------------------
+  # Optional: full stack in Docker (make dev-full). Disabled by default.
+  # ------------------------------------------------------------------
+  # backend:
+  #   build: ./backend
+  #   command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+  #   env_file: .env
+  #   environment:
+  #     DATABASE_URL: postgresql+asyncpg://procto:procto@postgres:5432/procto
+  #     REDIS_URL: redis://redis:6379/0
+  #     LIVEKIT_URL: ws://livekit:7880
+  #   ports: ["8001:8001"]
+  #   depends_on:
+  #     postgres: { condition: service_healthy }
+  #     redis: { condition: service_healthy }
+  #
+  # frontend:
+  #   build: ./frontend
+  #   command: npm run dev
+  #   environment:
+  #     NEXT_PUBLIC_API_URL: http://localhost:8001
+  #     NEXT_PUBLIC_WS_URL: ws://localhost:8001
+  #   ports: ["3001:3001"]
+  #   depends_on: [backend]
+
+volumes:
+  procto-pgdata:
+  procto-redis:

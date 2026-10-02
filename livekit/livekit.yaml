@@ -1,0 +1,26 @@
+# Procto — LiveKit SFU configuration (LOCAL DEVELOPMENT ONLY).
+#
+# The `keys` section is a well-known dev key pair. It is intentionally committed:
+# it grants no access outside a local machine. Production keys come from the
+# environment and are never committed.
+#
+# This file MUST stay in sync with LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env
+# (the backend uses those values to mint join tokens).
+
+port: 7880
+
+rtc:
+  port_range_start: 50000
+  port_range_end: 50099
+  # Local dev: no external IP discovery / no TURN.
+  use_external_ip: false
+  # Allow browsers on the same host to connect over plain ws:// on localhost.
+  allow_tcp_fallback: true
+
+keys:
+  procto-dev-key: procto-dev-secret
+
+logging:
+  level: info
+
+development: true

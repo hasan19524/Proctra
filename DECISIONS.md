@@ -118,3 +118,27 @@ placeholders and extension points only.
 
 **Consequences.** Meeting Assistant (Phase 16) is UI structure only; Exam mode
 (Phase 17) is non-ML foundation only.
+
+---
+
+## D10 — Local port allocation (coexistence with other projects)
+
+**Context.** This development machine also runs other projects (e.g. one using host
+ports 3000 and 8000 for its own web app and API, and a Postgres on 5433). Procto must
+not disturb them (project-owner constraint).
+
+**Decision.** Procto's local development ports are offset:
+
+| Service | Port |
+|---|---|
+| Next.js dev / prod | **3001** |
+| FastAPI | **8001** |
+| PostgreSQL (host) | **5434** (container 5432) |
+| Redis (host) | **6380** (container 6379) |
+| LiveKit | 7880 / 7881 / UDP 50000-50099 |
+
+Wired into: `docker-compose.yml`, `.env.example`, `frontend` dev scripts, `Makefile`,
+`scripts/procto.ps1`, and CORS/`NEXT_PUBLIC_*` URLs.
+
+**Consequences.** Procto runs side by side with other stacks without port fights.
+Production deployments are unaffected (ports come from environment configuration).

@@ -62,18 +62,26 @@ See [DEVELOPMENT.md](./DEVELOPMENT.md) for the phase checklist.
 
 ## Quick start
 
-Prerequisites: Docker (+ Compose), Node 20+, Python 3.13+, `uv`, Make.
+Prerequisites: Docker (+ Compose), Node 20+, Python 3.13+, `uv`.
+Task runner: **PowerShell script** on Windows (`scripts/procto.ps1`), **Make** elsewhere.
 
-```bash
-cp .env.example .env          # then edit secrets
-make infra-up                 # postgres + redis + livekit in Docker
-make setup                    # install backend + frontend deps, run migrations
-make dev                      # backend (8000) + frontend (3000)
-make check                    # lint + typecheck + tests
+```powershell
+# Windows (PowerShell)
+./scripts/procto.ps1 setup     # deps + .env + migrations
+./scripts/procto.ps1 infra up  # postgres + redis + livekit in Docker
+./scripts/procto.ps1 dev       # backend :8001 + frontend :3001 (2 windows)
+./scripts/procto.ps1 check     # lint + typecheck + tests
 ```
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000/api/health
+```bash
+# Linux / macOS (Make)
+cp .env.example .env
+make setup && make infra-up && make dev
+make check
+```
+
+- Frontend: http://localhost:3001
+- Backend API: http://localhost:8001/api/health (docs: `/api/docs`)
 - LiveKit: http://localhost:7880 (dev key pair in `.env`)
 
 ## License

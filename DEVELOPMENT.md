@@ -30,38 +30,55 @@ PROCTO/
 
 ## Setup
 
+Windows (PowerShell):
+
+```powershell
+./scripts/procto.ps1 setup      # deps + .env + migrations
+./scripts/procto.ps1 infra up   # postgres + redis + livekit
+./scripts/procto.ps1 dev        # backend :8001 + frontend :3001
+```
+
+Linux / macOS (Make):
+
 ```bash
 cp .env.example .env      # fill in secrets (LiveKit keys are generated for you)
 make infra-up             # start postgres + redis + livekit
 make setup                # backend deps + frontend deps + db migration
-make dev                  # backend :8000 + frontend :3000
+make dev                  # backend :8001 + frontend :3001
 ```
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `make dev` | run backend (uvicorn --reload) and frontend (next dev) together |
-| `make dev-backend` / `make dev-frontend` | run one side only |
-| `make dev-full` | everything (incl. apps) in Docker |
-| `make infra-up` / `make infra-down` | start/stop infrastructure containers |
-| `make db-upgrade` | apply Alembic migrations |
-| `make db-revision m="msg"` | create a new empty migration |
-| `make test` | backend pytest + frontend vitest |
-| `make lint` | ruff (backend) + eslint/prettier check (frontend) |
-| `make typecheck` | mypy (backend) + tsc --noEmit (frontend) |
-| `make check` | lint + typecheck + tests |
-| `make fmt` | auto-fix formatting on both sides |
+Both runners expose the same verbs: `setup`, `dev`, `dev-backend`, `dev-frontend`,
+`check`, `test`, `lint`, `typecheck`, `fmt`, `infra up|down`, `db upgrade|revision`.
+Windows: `./scripts/procto.ps1 <verb>` · elsewhere: `make <target>`.
+
+| Command (Make) | PowerShell | What it does |
+|---|---|---|
+| `make dev` | `procto.ps1 dev` | run backend (uvicorn --reload) and frontend (next dev) |
+| `make dev-backend` / `dev-frontend` | same verb | run one side only |
+| `make dev-full` | — | everything (incl. apps) in Docker |
+| `make infra-up` / `infra-down` | `procto.ps1 infra up\|down` | start/stop infrastructure containers |
+| `make db-upgrade` | `procto.ps1 db upgrade` | apply Alembic migrations |
+| `make db-revision m="msg"` | `procto.ps1 db revision "msg"` | create a new migration |
+| `make test` | `procto.ps1 test` | backend pytest + frontend vitest |
+| `make lint` | `procto.ps1 lint` | ruff + eslint/prettier check |
+| `make typecheck` | `procto.ps1 typecheck` | mypy + tsc --noEmit |
+| `make check` | `procto.ps1 check` | lint + typecheck + tests |
+| `make fmt` | `procto.ps1 fmt` | auto-fix formatting on both sides |
 
 ## Ports
 
 | Port | Service |
 |---|---|
-| 3000 | Next.js dev |
-| 8000 | FastAPI |
-| 5432 | PostgreSQL |
-| 6379 | Redis |
-| 7880 / 7881 | LiveKit HTTP + RTC (UDP 50000-60000 in compose) |
+| 3001 | Next.js dev |
+| 8001 | FastAPI |
+| 5434 | PostgreSQL (host port; container 5432) |
+| 6380 | Redis (host port; container 6379) |
+| 7880 / 7881 | LiveKit HTTP + RTC (UDP 50000-50099 in compose) |
+
+Ports are offset from the usual 3000/8000/5432/6379 to coexist with other projects
+on this machine — see [DECISIONS.md](./DECISIONS.md) D10.
 
 ## Testing strategy
 

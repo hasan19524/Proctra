@@ -168,3 +168,32 @@ Recorded in `DESIGN.md` §9 with a per-surface mapping table.
 Palette stays indigo-tinted (we did not adopt Google's neutral grays) — revisit only
 if the owner asks for a closer color match. Reactions UI ships as visual-only until
 Phase 10 (open question in the Phase 1 report).
+
+---
+
+## D12 - Session transport: same-origin proxy + in-memory access token
+
+**Context.** The refresh cookie is httpOnly, SameSite=Lax and scoped to
+/api/v1/auth. Browsers drop it for cross-origin requests, so a direct
+etch("http://localhost:8001/...") from the app on :3001 would never carry it.
+
+**Decision.**
+
+- The browser only talks to same-origin /api/v1/*; Next.js rewrites proxy it
+  to http://localhost:8001/api/v1/* (
+ext.config.ts, override with
+  API_INTERNAL_URL). Cookies therefore flow on every auth call, and no CORS
+  is needed in dev or prod.
+- The access JWT lives in module memory (src/lib/api.ts), never in
+  localStorage/sessionStorage. On a 401 the client refreshes **once**
+  (single-flight) and retries; a failed refresh clears the session.
+- Session state is a small React context (SessionProvider) that refreshes on
+  first paint; protected routes (/, /room) render a loading gate and
+  redirect to /login when no session exists. No zustand/TanStack Query yet -
+  plain React state was sufficient for Phase 2; revisit when meeting state
+  arrives (Phase 4+).
+
+**Consequences.** Refresh rotation and reuse detection work unchanged from the
+browser. WebSocket auth (Phase 4) will pass the access token as a query param
+instead, since Next rewrites do not proxy WebSockets (per SECURITY.md).
+

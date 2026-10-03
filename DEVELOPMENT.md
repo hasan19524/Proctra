@@ -89,33 +89,34 @@ on this machine — see [DECISIONS.md](./DECISIONS.md) D10.
 | Backend WS | FastAPI `TestClient` websocket support | realtime phases |
 | Frontend unit | `vitest` + React Testing Library | component logic |
 | Frontend type | `tsc --noEmit` | every phase |
-| E2E / multi-browser | Playwright | Phase 18 (testing & polish) |
+| E2E / multi-browser | Playwright | Phase 15 (full E2E validation) |
 
-Rule from the spec: every phase runs `make check` before it is considered done.
+Rule from the spec: every phase runs `check` (see `scripts/procto.ps1`) before it is considered done.
 
 ## Phase status
+
+Owner directive (2026-10-03): develop autonomously through Phase 15 — no
+phase-by-phase approvals. AI/ML/proctoring/exam-intelligence stays outside the
+boundary.
 
 | Phase | Status |
 |---|---|
 | 0 — Architecture & foundation | ✅ done |
-| 1 — Design system | 🔨 in progress — awaiting owner approval |
-| 2 — Authentication | ⬜ |
-| 3 — Procto Home | ⬜ |
-| 4 — Create meeting | ⬜ |
-| 5 — Join + pre-join lobby | ⬜ |
-| 6 — Real-time meeting core | ⬜ |
-| 7 — Complete meeting room | ⬜ |
-| 8 — Participant management | ⬜ |
-| 9 — Chat / messages | ⬜ |
-| 10 — Reactions + hand raise | ⬜ |
-| 11 — Screen sharing | ⬜ |
-| 12 — Notes / writing | ⬜ |
-| 13 — Meeting security | ⬜ |
-| 14 — Failure & reconnection | ⬜ |
-| 15 — Meeting history | ⬜ |
-| 16 — Future AI UI only | ⬜ |
-| 17 — Exam/Interview foundation | ⬜ |
-| 18 — Testing & polish | ⬜ |
+| 1 — Design system + Meet-style UI | ✅ done |
+| 2 — Authentication + user system | ✅ done |
+| 3 — Meeting creation, join, pre-join lobby | ⬜ |
+| 4 — Real-time WS core (FastAPI + Redis + PG) | ⬜ |
+| 5 — Chat | ⬜ |
+| 6 — Participant management + host controls | ⬜ |
+| 7 — Notes | ⬜ |
+| 8 — Reactions + hand raise (real) | ⬜ |
+| 9 — LiveKit real audio/video | ⬜ |
+| 10 — Screen sharing | ⬜ |
+| 11 — Complete meeting experience | ⬜ |
+| 12 — Failure + reconnection | ⬜ |
+| 13 — Security hardening | ⬜ |
+| 14 — History + polish | ⬜ |
+| 15 — Full E2E validation | ⬜ |
 
 ## Conventions
 

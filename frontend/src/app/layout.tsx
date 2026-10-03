@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono, Lexend, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
 
+import { SessionProvider } from "@/components/auth/session-context";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -41,10 +42,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col">
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <ThemeProvider>
-          <TooltipProvider delay={300}>
-            {children}
-            <Toaster />
-          </TooltipProvider>
+          <SessionProvider>
+            <TooltipProvider delay={300}>
+              {children}
+              <Toaster />
+            </TooltipProvider>
+          </SessionProvider>
         </ThemeProvider>
       </body>
     </html>

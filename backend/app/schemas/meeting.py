@@ -26,3 +26,10 @@ class MeetingOut(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     ended_at: datetime | None = None
+
+
+class LiveKitTokenOut(BaseModel):
+    """Ephemeral SFU credentials for joining the meeting's LiveKit room."""
+
+    url: str
+    token: str

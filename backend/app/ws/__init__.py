@@ -1,5 +1,6 @@
-"""Application WebSocket gateway (Phase 6).
+"""Application WebSocket gateway (Phase 4).
 
-Will host: authenticated connect handshake, versioned JSON event envelope,
-per-meeting room registry, Redis pub/sub fan-out, reconnect sync (see REALTIME.md).
+Hosts: authenticated connect handshake (gateway), versioned JSON event
+envelope, per-meeting connection registry, Redis presence + pub/sub fan-out,
+heartbeat/idle handling (see REALTIME.md).
 """

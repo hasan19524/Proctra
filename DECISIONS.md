@@ -175,13 +175,12 @@ Phase 10 (open question in the Phase 1 report).
 
 **Context.** The refresh cookie is httpOnly, SameSite=Lax and scoped to
 /api/v1/auth. Browsers drop it for cross-origin requests, so a direct
-etch("http://localhost:8001/...") from the app on :3001 would never carry it.
+fetch("http://localhost:8001/...") from the app on :3001 would never carry it.
 
 **Decision.**
 
 - The browser only talks to same-origin /api/v1/*; Next.js rewrites proxy it
-  to http://localhost:8001/api/v1/* (
-ext.config.ts, override with
+  to http://localhost:8001/api/v1/* (see next.config.ts, override with
   API_INTERNAL_URL). Cookies therefore flow on every auth call, and no CORS
   is needed in dev or prod.
 - The access JWT lives in module memory (src/lib/api.ts), never in
@@ -196,4 +195,33 @@ ext.config.ts, override with
 **Consequences.** Refresh rotation and reuse detection work unchanged from the
 browser. WebSocket auth (Phase 4) will pass the access token as a query param
 instead, since Next rewrites do not proxy WebSockets (per SECURITY.md).
+
+---
+
+## D13 - Meeting identity: Meet-style short codes, API-owned
+
+**Context.** Meetings need an identifier humans can read aloud, paste into the
+join box and share in invites, without exposing sequential IDs.
+
+**Decision.**
+
+- Codes are 11 characters in the shape `xxx-yyy-zzz`, drawn from a 31-char
+  alphabet that drops `0/o/1/l` (ambiguity), with a unique index in Postgres
+  and up to 5 collision retries per create (`meeting_service`).
+- `POST /api/v1/meetings` (auth) creates a meeting in status `waiting`;
+  `GET /api/v1/meetings/{code}` (auth) looks it up case-insensitively and
+  returns 404 `Meeting not found` otherwise. Lookups are auth-gated like the
+  rest of the API; the WS layer (Phase 4) re-checks membership.
+- The pre-join lobby requests a **real** `getUserMedia({audio, video})`
+  stream, mirrors the preview, toggles `track.enabled` for mic/camera, and
+  stops all tracks on unmount; missing or blocked media degrades to an
+  initials tile with a clear message instead of failing the join.
+- The in-call route is `/room/[code]` and reads the segment with
+  `useParams` (client component). The legacy bare `/room` redirects home.
+- Host display name pre-fills from the session; joining sends the trimmed
+  display name plus mic/camera choices as `JoinOptions`.
+
+**Consequences.** Codes are short enough to speak and type; the unique index
+plus retry loop makes collisions a non-event. Lobby media is real, so Phase 9
+(LiveKit) can promote the same tracks instead of re-acquiring them.
 

@@ -104,7 +104,7 @@ boundary.
 | 0 — Architecture & foundation | ✅ done |
 | 1 — Design system + Meet-style UI | ✅ done |
 | 2 — Authentication + user system | ✅ done |
-| 3 — Meeting creation, join, pre-join lobby | ⬜ |
+| 3 — Meeting creation, join, pre-join lobby | ✅ done |
 | 4 — Real-time WS core (FastAPI + Redis + PG) | ⬜ |
 | 5 — Chat | ⬜ |
 | 6 — Participant management + host controls | ⬜ |

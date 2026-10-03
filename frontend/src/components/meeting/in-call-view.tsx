@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
 import { useClock } from "@/hooks/use-clock";
+import type { MediaTile } from "@/hooks/use-livekit-room";
 import type {
   MeetingMeta,
   NoteVisibility,
@@ -24,6 +25,7 @@ import {
 import { ParticipantTile } from "@/components/meeting/participant-tile";
 import { ReactionBar, REACTIONS } from "@/components/meeting/reaction-bar";
 import { MeetingTopBar } from "@/components/meeting/meeting-top-bar";
+import { TrackAudio, TrackVideo } from "@/components/meeting/track-media";
 import type { MeetingStatus } from "@/components/meeting/status-indicator";
 
 interface InCallViewProps {
@@ -36,6 +38,7 @@ interface InCallViewProps {
   meeting: MeetingMeta | null;
   notes: WsNote[];
   reactions: WsReaction[];
+  mediaTiles?: MediaTile[];
   onSendChat: (body: string) => string | null;
   onSendNote: (visibility: NoteVisibility, text: string) => string | null;
   onSendReaction: (label: string) => string | null;
@@ -79,6 +82,7 @@ export function InCallView({
   meeting,
   notes,
   reactions,
+  mediaTiles = [],
   onSendChat,
   onSendNote,
   onSendReaction,
@@ -130,12 +134,22 @@ export function InCallView({
     toast.add({ type: "info", title: message });
   }, []);
 
+  const videoFor = (tile: MediaTile | undefined): React.ReactNode =>
+    tile?.cameraTrack ? <TrackVideo track={tile.cameraTrack} mirrored={tile.isLocal} /> : null;
+
+  const localTile = mediaTiles.find((tile) => tile.isLocal);
+
   const togglePanel = React.useCallback((next: "people" | "chat" | "notes") => {
     setPanel((current) => (current === next ? null : next));
   }, []);
 
   return (
     <div className="bg-background text-foreground relative flex h-svh flex-col">
+      {mediaTiles.map((tile) =>
+        tile.isLocal || !tile.audioTrack ? null : (
+          <TrackAudio key={tile.id} track={tile.audioTrack} />
+        ),
+      )}
       <MeetingTopBar
         code={code}
         time={time}
@@ -156,6 +170,7 @@ export function InCallView({
               isHandRaised={isHandRaised}
               isHost={self?.is_host ?? true}
               connection="excellent"
+              media={videoFor(localTile)}
               className="h-full w-full"
             />
           </div>
@@ -171,6 +186,9 @@ export function InCallView({
                   isHandRaised={participant.hand_raised}
                   isHost={participant.is_host}
                   connection="excellent"
+                  media={videoFor(
+                    mediaTiles.find((tile) => tile.id === participant.user_id && !tile.isLocal),
+                  )}
                   className="w-52"
                 />
               ))}

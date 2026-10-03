@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import { toast } from "@/components/ui/toast";
+import { useLiveKitRoom } from "@/hooks/use-livekit-room";
 import { useMeetingWs } from "@/hooks/use-meeting-ws";
 import { InCallView } from "@/components/meeting/in-call-view";
 import { Button } from "@/components/ui/button";
@@ -48,6 +50,21 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
   const self = participants.find((participant) => participant.user_id === selfUserId) ?? null;
   const isHandRaised = self?.hand_raised ?? false;
 
+  // Media (LiveKit SFU) runs beside the app WS: roster on one socket, real
+  // audio/video on the SFU. A media failure degrades to chat-only.
+  const media = useLiveKitRoom(code, micOn, cameraOn);
+  const mediaStatusRef = React.useRef(media.status);
+  React.useEffect(() => {
+    if (media.status === "failed" && mediaStatusRef.current !== "failed") {
+      toast.add({
+        type: "warning",
+        title: "Live media unavailable",
+        description: "Video and audio could not connect — chat and notes still work.",
+      });
+    }
+    mediaStatusRef.current = media.status;
+  }, [media.status]);
+
   // Host muted me: turn the mic off locally (render-phase adjustment, the
   // documented React pattern for deriving state from a prop/event).
   if (selfMuteNonce > handledMuteNonce) {
@@ -85,6 +102,7 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       meeting={meeting}
       notes={notes}
       reactions={reactions}
+      mediaTiles={media.tiles}
       onSendChat={sendChat}
       onSendNote={(visibility, text) => sendNoteSave(visibility, { text })}
       onSendReaction={sendReaction}

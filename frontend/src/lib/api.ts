@@ -193,6 +193,12 @@ export interface Meeting {
   ended_at: string | null;
 }
 
+/** Ephemeral LiveKit (SFU) credentials for one meeting. */
+export interface LiveKitCredentials {
+  url: string;
+  token: string;
+}
+
 export const meetingsApi = {
   async create(title?: string): Promise<Meeting> {
     return apiFetch<Meeting>("/api/v1/meetings", {
@@ -203,6 +209,14 @@ export const meetingsApi = {
 
   async get(code: string): Promise<Meeting> {
     return apiFetch<Meeting>(`/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}`);
+  },
+
+  /** Mint SFU join credentials (server enforces lock/end before issuing). */
+  async getToken(code: string): Promise<LiveKitCredentials> {
+    return apiFetch<LiveKitCredentials>(
+      `/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}/token`,
+      { method: "POST" },
+    );
   },
 };
 

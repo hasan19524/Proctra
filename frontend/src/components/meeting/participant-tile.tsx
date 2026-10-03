@@ -24,6 +24,8 @@ type ParticipantTileProps = {
   isPinned?: boolean;
   connection?: ConnectionQualityLevel;
   onPin?: () => void;
+  /** Live video element(s) rendered over the avatar placeholder. */
+  media?: React.ReactNode;
   className?: string;
 };
 
@@ -49,6 +51,7 @@ function ParticipantTile({
   isPinned = false,
   connection,
   onPin,
+  media,
   className,
 }: ParticipantTileProps) {
   const fallback = initials ?? (participantInitials(name) || "?");
@@ -66,6 +69,7 @@ function ParticipantTile({
       )}
     >
       <div className="bg-muted relative flex flex-1 items-center justify-center">
+        {media ? <div className="absolute inset-0 z-0">{media}</div> : null}
         <div className="text-muted-foreground flex flex-col items-center gap-2">
           <Avatar className="size-16">
             {avatarSrc ? <AvatarImage src={avatarSrc} alt="" /> : null}

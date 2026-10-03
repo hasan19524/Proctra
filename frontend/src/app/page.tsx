@@ -20,6 +20,8 @@ import { UserMenu } from "@/components/auth/user-menu";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/components/ui/toast";
 import {
   Empty,
   EmptyDescription,
@@ -27,6 +29,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { extractMeetingCode, meetingsApi } from "@/lib/api";
 import { cn } from "cn";
 
 const NAV_ITEMS = [
@@ -46,6 +49,7 @@ function startOfWeek(date: Date): Date {
 export default function Home() {
   const router = useRouter();
   const [code, setCode] = React.useState("");
+  const [isStarting, setIsStarting] = React.useState(false);
   const today = React.useMemo(() => new Date(), []);
 
   const week = React.useMemo(() => {
@@ -63,7 +67,34 @@ export default function Home() {
     month: "short",
   });
 
-  const goRoom = () => router.push("/room");
+  const startMeet = async () => {
+    setIsStarting(true);
+    try {
+      const meeting = await meetingsApi.create();
+      router.push(`/room/${meeting.code}`);
+    } catch (error) {
+      toast.add({
+        type: "error",
+        title: "Couldn't start a meet",
+        description: error instanceof Error ? error.message : undefined,
+      });
+      setIsStarting(false);
+    }
+  };
+
+  const joinMeet = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const extracted = extractMeetingCode(code);
+    if (!extracted) {
+      toast.add({
+        type: "error",
+        title: "That doesn't look like a meet code",
+        description: "Codes look like abc-def-ghi — or paste the invite link.",
+      });
+      return;
+    }
+    router.push(`/room/${extracted}`);
+  };
 
   return (
     <RequireSession>
@@ -82,10 +113,7 @@ export default function Home() {
           </Link>
 
           <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (code.trim()) goRoom();
-            }}
+            onSubmit={joinMeet}
             className="border-input bg-muted/60 focus-within:ring-ring/50 mx-auto flex w-full max-w-md items-center gap-2 rounded-full border py-1.5 pr-1.5 pl-4 focus-within:ring-3"
           >
             <Input
@@ -102,11 +130,16 @@ export default function Home() {
 
           <div className="flex shrink-0 items-center gap-1">
             <Button
-              render={<Link href="/room" />}
               variant="success"
+              onClick={() => void startMeet()}
+              disabled={isStarting}
               className="hidden rounded-full sm:flex"
             >
-              <VideoIcon data-icon="inline-start" />
+              {isStarting ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <VideoIcon data-icon="inline-start" />
+              )}
               New meet
             </Button>
             <Button variant="ghost" size="icon" aria-label="Help">
@@ -205,12 +238,18 @@ export default function Home() {
                     Start a meet now, or enter a code to join one that is already running.
                   </EmptyDescription>
                 </EmptyHeader>
+
                 <Button
-                  render={<Link href="/room" />}
                   variant="success"
+                  onClick={() => void startMeet()}
+                  disabled={isStarting}
                   className="mt-4 rounded-full"
                 >
-                  <VideoIcon data-icon="inline-start" />
+                  {isStarting ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : (
+                    <VideoIcon data-icon="inline-start" />
+                  )}
                   New meet
                 </Button>
               </Empty>

@@ -121,7 +121,7 @@ placeholders and extension points only.
 
 ---
 
-## D10 � Local port allocation (coexistence with other projects)
+## D10 - Local port allocation (coexistence with other projects)
 
 **Context.** This development machine also runs other projects (e.g. one using host
 ports 3000 and 8000 for its own web app and API, and a Postgres on 5433). Procto must
@@ -225,3 +225,29 @@ join box and share in invites, without exposing sequential IDs.
 plus retry loop makes collisions a non-event. Lobby media is real, so Phase 9
 (LiveKit) can promote the same tracks instead of re-acquiring them.
 
+
+
+## D14 - Realtime transport: subscribe-before-broadcast + dedicated pub/sub client
+
+**Status:** Accepted (2026-10-03, Phase 4)
+
+**Context.** The WS gateway fans frames out through Redis pub/sub on
+`ws:meeting:{code}`. A subscriber only receives messages published *after*
+its SUBSCRIBE completes, and the shared Redis client carries a 2 s
+`socket_timeout` that would kill an idle subscription.
+
+**Decision.**
+- The gateway subscribes each connection's pub/sub *before* registering
+  presence or announcing the join (snapshot -> subscribe -> announce), so no
+  connection can miss its own join frame.
+- Pub/sub uses a dedicated client (`get_pubsub_client()`) with no
+  `socket_timeout`; command traffic (rate limits, presence hashes) keeps the
+  shared 2 s-timeout client.
+- The handshake runs entirely before `accept` (DB session closed first);
+  rejects close with machine-readable codes 4001/4003/4004, idle timeout is
+  4013, and the frontend client reconnects with jittered exponential backoff,
+  retrying 4001 once after a token refresh.
+
+**Consequences.** Fan-out is race-free and idle listeners survive; the
+frontend `src/lib/ws` client owns the 25 s heartbeat, `seq` tracking, and
+reconnect policy per REALTIME.md.

@@ -180,3 +180,34 @@ export const authApi = {
     }
   },
 };
+
+export interface Meeting {
+  id: string;
+  code: string;
+  title: string | null;
+  host_id: string;
+  status: "waiting" | "live" | "ended";
+  is_locked: boolean;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export const meetingsApi = {
+  async create(title?: string): Promise<Meeting> {
+    return apiFetch<Meeting>("/api/v1/meetings", {
+      method: "POST",
+      body: title ? { title } : {},
+    });
+  },
+
+  async get(code: string): Promise<Meeting> {
+    return apiFetch<Meeting>(`/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}`);
+  },
+};
+
+/** Extract a meet code from raw input (bare code or pasted link). */
+export function extractMeetingCode(input: string): string | null {
+  const match = input.match(/([a-z2-9]{3}-[a-z2-9]{3}-[a-z2-9]{3})/i);
+  return match ? match[1].toLowerCase() : null;
+}

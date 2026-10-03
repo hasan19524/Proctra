@@ -5,7 +5,9 @@ import {
   apiFetch,
   authApi,
   clearAccessToken,
+  extractMeetingCode,
   getAccessToken,
+  meetingsApi,
   refreshSession,
   type AuthResponse,
 } from "@/lib/api";
@@ -193,5 +195,61 @@ describe("refreshSession", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).message).toBe("value is not a valid email address");
+  });
+});
+
+describe("meetingsApi", () => {
+  it("posts to /meetings with a title and the bearer token", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, authFixture()));
+    await authApi.login("hasan@example.com", "password123");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(201, {
+        id: "m-1",
+        code: "ktq-vxm-pnz",
+        title: "Sprint",
+        host_id: "u-1",
+        status: "waiting",
+        is_locked: false,
+        created_at: "2026-10-03T00:00:00Z",
+        started_at: null,
+        ended_at: null,
+      }),
+    );
+
+    const meeting = await meetingsApi.create("Sprint");
+
+    expect(meeting.code).toBe("ktq-vxm-pnz");
+    const [url, init] = fetchMock.mock.calls[1] ?? [];
+    expect(url).toBe("/api/v1/meetings");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toMatchObject({ Authorization: "Bearer access-1" });
+    expect(JSON.parse(String(init?.body))).toEqual({ title: "Sprint" });
+  });
+
+  it("normalizes the code when fetching a meeting", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, authFixture()));
+    await authApi.login("hasan@example.com", "password123");
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: "m-1", code: "ktq-vxm-pnz" }));
+    await meetingsApi.get("  Ktq-Vxm-Pnz ");
+
+    const [url] = fetchMock.mock.calls[1] ?? [];
+    expect(url).toBe("/api/v1/meetings/ktq-vxm-pnz");
+  });
+});
+
+describe("extractMeetingCode", () => {
+  it.each([
+    ["ktq-vxm-pnz", "ktq-vxm-pnz"],
+    ["  Ktq-Vxm-Pnz  ", "ktq-vxm-pnz"],
+    ["https://procto.app/room/ktq-vxm-pnz", "ktq-vxm-pnz"],
+    ["join me at /room/ktq-vxm-pnz please", "ktq-vxm-pnz"],
+  ])("extracts from %j", (input, expected) => {
+    expect(extractMeetingCode(input)).toBe(expected);
+  });
+
+  it.each([[""], ["hello"], ["abc-def"], ["ktqvxmpnz"]])("rejects %j", (input) => {
+    expect(extractMeetingCode(input)).toBeNull();
   });
 });

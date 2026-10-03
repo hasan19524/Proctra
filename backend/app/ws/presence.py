@@ -63,6 +63,7 @@ async def upsert_presence(
         "mic_on": True,
         "camera_on": True,
         "hand_raised": False,
+        "screen_share_on": False,
         "joined_at": _now_ms(),
     }
     if flags:
@@ -84,7 +85,7 @@ async def update_flags(
     if raw is None:
         return None
     entry: dict[str, Any] = json.loads(raw)
-    allowed = {"mic_on", "camera_on", "hand_raised"}
+    allowed = {"mic_on", "camera_on", "hand_raised", "screen_share_on"}
     # Ignore anything that is not a real boolean rather than trusting it.
     entry.update({k: v for k, v in flags.items() if k in allowed and isinstance(v, bool)})
     await redis.hset(key, user_id, json.dumps(entry))

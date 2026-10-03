@@ -663,7 +663,21 @@ async def _serve(
                     last_seq = raw_last_seq
             await _replay_chat(websocket, meeting, last_seq)
         elif frame.type == "presence.update":
-            updated = await presence.update_flags(meeting_code, str(user.id), flags=frame.payload)
+            flags = frame.payload if isinstance(frame.payload, dict) else {}
+            if flags.get("screen_share_on") is True:
+                # Re-read: the host may have flipped the permission after this
+                # connection loaded its meeting (same pattern as chat/reactions).
+                async with SessionLocal() as session:
+                    row = await session.get(Meeting, meeting.id)
+                    allowed = row is not None and row.allow_screen_share
+                if not allowed:
+                    await _send_ws_error(
+                        websocket,
+                        "permission_denied",
+                        "Screen sharing is turned off by the host",
+                    )
+                    continue
+            updated = await presence.update_flags(meeting_code, str(user.id), flags=flags)
             if updated is not None:
                 await _broadcast(
                     meeting_code,

@@ -7,6 +7,7 @@ Redis fixtures). Frames are exchanged through two asyncio queues.
 
 import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
 WS_PATH_TYPE = "websocket"
@@ -81,15 +82,24 @@ class WsTestClient:
             return frame
         raise AssertionError(f"unexpected outbound frame: {message}")
 
-    async def receive_type(self, frame_type: str, timeout: float = 5.0) -> dict[str, Any]:
-        """Pop frames until one of ``frame_type`` arrives (others discarded)."""
+    async def receive_type(
+        self,
+        frame_type: str,
+        timeout: float = 5.0,
+        where: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Pop frames until one of ``frame_type`` arrives (others discarded).
+
+        ``where`` optionally filters on the frame payload (e.g. ignore the
+        first presence.state and wait for the one with our flag set).
+        """
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise TimeoutError(f"no {frame_type} frame within {timeout}s")
             frame = await self.receive(timeout=remaining)
-            if frame["type"] == frame_type:
+            if frame["type"] == frame_type and (where is None or where(frame)):
                 return frame
 
     async def close(self) -> None:

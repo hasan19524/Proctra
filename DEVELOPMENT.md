@@ -110,7 +110,7 @@ boundary.
 | 6 — Participant management + host controls | ✅ done |
 | 7 — Notes | ✅ done |
 | 8 — Reactions + hand raise (real) | ✅ done |
-| 9 — LiveKit real audio/video | ⬜ |
+| 9 — LiveKit real audio/video | ✅ done |
 | 10 — Screen sharing | ⬜ |
 | 11 — Complete meeting experience | ⬜ |
 | 12 — Failure + reconnection | ⬜ |

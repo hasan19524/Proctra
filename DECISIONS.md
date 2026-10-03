@@ -364,3 +364,41 @@ raised hand (must survive reconnects and show up in snapshots).
 **Consequences.** Reactions cannot leak load into the database or the replay
 path; the hand persists exactly as long as presence does, and Phase 13 can
 rate-limit `reaction.send` without touching a storage model.
+
+---
+
+## D19 - LiveKit is the media path; the app API mints join tokens
+
+**Status:** Accepted (2026-10-04, Phase 9)
+
+**Context.** The meeting socket already carries roster, chat, notes, and
+controls, but real audio/video must go through an SFU (ARCHITECTURE.md 8).
+Someone has to hand a browser a short-lived, room-scoped credential without
+letting the client forge grants.
+
+**Decision.**
+- `POST /api/v1/meetings/{code}/token` mints the JWT server-side with
+  `livekit-api` (`AccessToken` + `VideoGrants(room_join)`), identity =
+  `str(user.id)`, name = display name, TTL 10 minutes. The API is the only
+  holder of the LiveKit API key/secret (`config.py`, `.env`).
+- Gates mirror the socket: 404 unknown code, 403 `ended`, 403 `locked` for
+  non-hosts - a rejected token endpoint is the same admission control as a
+  rejected WS join.
+- The frontend runs ONE `Room` per call via `useLiveKitRoom(code, micOn,
+  cameraOn)` beside the app WS: roster/presence stays on the app socket, only
+  media rides the SFU. Mic/camera flags push into LiveKit publications after
+  connect; tiles are projected as `MediaTile {id, name, isLocal, cameraTrack,
+  audioTrack}` keyed by identity = user id so they line up with roster rows.
+- Two rosters coexist by design: WS presence is authoritative for UI
+  (mute/hand/host flags, reconnect snapshots); LiveKit publications are
+  authoritative for media (a tile shows video only when an unmuted camera
+  publication exists). D19 keeps them from having to agree beyond the shared
+  identity key.
+- Known caveat: identity = user id means a second tab for the same account
+  joins the LiveKit room as a duplicate identity (SFU second-connection wins
+  media). Multi-tab handling is deferred to Phase 12/15 if it shows up in E2E.
+
+**Consequences.** Grants can never outlive the meeting state (lock/end cut
+off new tokens even for open sockets of past tabs), the secret never reaches
+the browser, and swapping SFU vendors means changing only the token service
+and `useLiveKitRoom`.

@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
 import { useClock } from "@/hooks/use-clock";
+import { RequireSession, useSession } from "@/components/auth/session-context";
 import { MeetingControls, UtilityCluster } from "@/components/meeting/meeting-controls";
 import {
   ChatPanel,
@@ -18,15 +19,25 @@ import { MeetingTopBar } from "@/components/meeting/meeting-top-bar";
 const MEET_CODE = "ktq-vxm-pnz";
 
 const PARTICIPANTS: PanelParticipant[] = [
-  { id: "you", name: "Hasan", role: "Meeting host", isMuted: false, isYou: true },
+  { id: "you", name: "You", role: "Meeting host", isMuted: false, isYou: true },
   { id: "amina", name: "Amina Yusuf", role: "Contributor" },
   { id: "carlos", name: "Carlos Mendes", role: "Contributor", isMuted: true },
   { id: "priya", name: "Priya Nair", role: "Contributor" },
 ];
 
-function RoomPage() {
+function RoomContent() {
   const now = useClock();
   const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const { user } = useSession();
+  const yourName = user?.display_name ?? "You";
+
+  const participants = React.useMemo(
+    () =>
+      PARTICIPANTS.map((participant) =>
+        participant.id === "you" ? { ...participant, name: yourName } : participant,
+      ),
+    [yourName],
+  );
 
   const [state, setState] = React.useState({
     isMicOn: true,
@@ -52,7 +63,7 @@ function RoomPage() {
       <MeetingTopBar
         code={MEET_CODE}
         time={time}
-        participantCount={PARTICIPANTS.length}
+        participantCount={participants.length}
         onShowDetails={() => demo("Meeting details (demo)")}
         onOpenPeople={() => togglePanel("people")}
       />
@@ -61,7 +72,7 @@ function RoomPage() {
         <main className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="min-h-0 flex-1">
             <ParticipantTile
-              name="Hasan (You)"
+              name={`${yourName} (You)`}
               isMuted={!state.isMicOn}
               isCameraOff={!state.isCameraOn}
               isScreenSharing={state.isScreenSharing}
@@ -115,7 +126,7 @@ function RoomPage() {
         {panel === "people" ? (
           <div className="w-96 max-w-full shrink-0">
             <PeoplePanel
-              participants={PARTICIPANTS}
+              participants={participants}
               onAddPeople={() => demo("Invite people (demo)")}
               onClose={() => setPanel(null)}
               className="h-full"
@@ -133,7 +144,7 @@ function RoomPage() {
                   ...current,
                   {
                     id: `${current.length + 1}`,
-                    author: "Hasan",
+                    author: yourName,
                     text,
                     time,
                   },
@@ -161,4 +172,10 @@ function RoomPage() {
   );
 }
 
-export default RoomPage;
+export default function RoomPage() {
+  return (
+    <RequireSession>
+      <RoomContent />
+    </RequireSession>
+  );
+}

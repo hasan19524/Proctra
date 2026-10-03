@@ -88,6 +88,28 @@ describe("PeoplePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Add people/ }));
     expect(onAddPeople).toHaveBeenCalledTimes(1);
   });
+
+  it("offers host mute and remove actions, never for yourself", () => {
+    const onMute = vi.fn();
+    const onRemove = vi.fn();
+    render(
+      <PeoplePanel participants={participants} canManage onMute={onMute} onRemove={onRemove} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute Amina Yusuf" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Carlos Mendes from the meet" }));
+    expect(onMute).toHaveBeenCalledWith("amina");
+    expect(onRemove).toHaveBeenCalledWith("carlos");
+
+    expect(screen.queryByRole("button", { name: "Mute Hasan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove Hasan from the meet" })).toBeNull();
+  });
+
+  it("keeps management actions hidden from non-hosts", () => {
+    render(<PeoplePanel participants={participants} onMute={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Mute Amina Yusuf" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove Carlos Mendes from the meet" })).toBeNull();
+  });
 });
 
 describe("ChatPanel", () => {
@@ -129,12 +151,25 @@ describe("ChatPanel", () => {
     expect((input as HTMLInputElement).value).toBe("");
   });
 
-  it("shows the continuous chat notice when messages are turned off", () => {
-    render(<ChatPanel />);
-    expect(screen.queryByText("Continuous chat is turned off")).toBeNull();
+  it("exposes the host chat switch and the turned-off notice", () => {
+    const onToggleAllowChat = vi.fn();
+    const view = render(
+      <ChatPanel canManage allowChat={true} onToggleAllowChat={onToggleAllowChat} />,
+    );
+    expect(screen.queryByText("Chat is turned off")).toBeNull();
 
     fireEvent.click(screen.getByRole("switch"));
-    expect(screen.getByText("Continuous chat is turned off")).toBeTruthy();
+    expect(onToggleAllowChat).toHaveBeenCalledWith(false);
+
+    view.rerender(<ChatPanel canManage allowChat={false} onToggleAllowChat={onToggleAllowChat} />);
+    expect(screen.getByText("Chat is turned off")).toBeTruthy();
+    expect(screen.getByLabelText("Send a message").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("hides the host switch from non-hosts", () => {
+    render(<ChatPanel allowChat={true} />);
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByText("Chat is turned off")).toBeNull();
   });
 });
 

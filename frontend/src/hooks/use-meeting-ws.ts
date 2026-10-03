@@ -25,14 +25,38 @@ export interface WsChatMessage {
   created_at: string;
 }
 
+export interface MeetingMeta {
+  status: string;
+  is_locked: boolean;
+  allow_chat: boolean;
+  allow_reactions: boolean;
+  allow_screen_share: boolean;
+}
+
 interface SyncStatePayload {
   self?: { user_id: string };
   participants?: WsParticipant[];
   messages?: WsChatMessage[];
+  meeting?: MeetingMeta;
 }
 
 interface PresenceStatePayload {
   participants?: WsParticipant[];
+}
+
+interface MeetingLockedPayload {
+  is_locked: boolean;
+}
+
+interface PermissionChangedPayload {
+  allow_chat?: boolean;
+  allow_reactions?: boolean;
+  allow_screen_share?: boolean;
+}
+
+interface ParticipantEventPayload {
+  user_id: string;
+  by_user_id?: string;
 }
 
 export interface ParticipantFlags {
@@ -70,7 +94,17 @@ export function useMeetingWs(code: string | null) {
   const [participants, setParticipants] = React.useState<WsParticipant[]>([]);
   const [selfUserId, setSelfUserId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<WsChatMessage[]>([]);
+  const [meeting, setMeeting] = React.useState<MeetingMeta | null>(null);
+  const [isRemoved, setIsRemoved] = React.useState(false);
+  const [selfMuteNonce, setSelfMuteNonce] = React.useState(0);
   const socketRef = React.useRef<MeetingSocket | null>(null);
+  // The self id arrives with sync.state, but frames can reference it first;
+  // a ref lets early events match without re-subscribing the socket.
+  const selfUserIdRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    selfUserIdRef.current = selfUserId;
+  }, [selfUserId]);
 
   React.useEffect(() => {
     if (!code) return;
@@ -83,6 +117,7 @@ export function useMeetingWs(code: string | null) {
       socket.on<SyncStatePayload>("sync.state", (payload) => {
         if (payload?.self?.user_id) setSelfUserId(payload.self.user_id);
         if (Array.isArray(payload?.participants)) setParticipants(payload.participants);
+        if (payload?.meeting) setMeeting(payload.meeting);
         if (Array.isArray(payload?.messages) && payload.messages.length > 0) {
           setMessages((current) => upsertMessages(current, payload.messages ?? []));
         }
@@ -93,6 +128,39 @@ export function useMeetingWs(code: string | null) {
       socket.on<WsChatMessage>("chat.message", (payload) => {
         if (payload && typeof payload.id === "string") {
           setMessages((current) => upsertMessages(current, [payload]));
+        }
+      }),
+      socket.on<MeetingLockedPayload>("meeting.locked", (payload) => {
+        if (payload && typeof payload.is_locked === "boolean") {
+          setMeeting((current) =>
+            current ? { ...current, is_locked: payload.is_locked } : current,
+          );
+        }
+      }),
+      socket.on<PermissionChangedPayload>("permission.changed", (payload) => {
+        if (!payload) return;
+        setMeeting((current) =>
+          current
+            ? {
+                ...current,
+                allow_chat: payload.allow_chat ?? current.allow_chat,
+                allow_reactions: payload.allow_reactions ?? current.allow_reactions,
+                allow_screen_share: payload.allow_screen_share ?? current.allow_screen_share,
+              }
+            : current,
+        );
+      }),
+      socket.on("meeting.ended", () => {
+        setMeeting((current) => (current ? { ...current, status: "ended" } : current));
+      }),
+      socket.on<ParticipantEventPayload>("participant.removed", (payload) => {
+        if (payload?.user_id && payload.user_id === selfUserIdRef.current) {
+          setIsRemoved(true);
+        }
+      }),
+      socket.on<ParticipantEventPayload>("participant.muted", (payload) => {
+        if (payload?.user_id && payload.user_id === selfUserIdRef.current) {
+          setSelfMuteNonce((nonce) => nonce + 1);
         }
       }),
     ];
@@ -110,6 +178,14 @@ export function useMeetingWs(code: string | null) {
     socketRef.current?.send("presence.update", flags);
   }, []);
 
+  /** Send a host-only action; returns the frame id or null when not connected. */
+  const sendHostAction = React.useCallback(
+    (action: string, payload: Record<string, unknown> = {}): string | null => {
+      return socketRef.current?.send("host.action", { action, ...payload }) ?? null;
+    },
+    [],
+  );
+
   /**
    * Send a chat message. Returns the idempotency key when queued/sent, or
    * `null` when the socket is closed or the text is blank.
@@ -121,5 +197,16 @@ export function useMeetingWs(code: string | null) {
     return socketRef.current?.send("chat.send", { body: trimmed, client_id: clientId }) ?? null;
   }, []);
 
-  return { status, participants, selfUserId, messages, updateFlags, sendChat };
+  return {
+    status,
+    participants,
+    selfUserId,
+    messages,
+    meeting,
+    isRemoved,
+    selfMuteNonce,
+    updateFlags,
+    sendChat,
+    sendHostAction,
+  };
 }

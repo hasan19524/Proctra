@@ -10,6 +10,7 @@ import {
   MoreVerticalIcon,
   SearchIcon,
   SendIcon,
+  UserMinusIcon,
   UserPlusIcon,
   XIcon,
 } from "lucide-react";
@@ -72,8 +73,18 @@ function PanelHeader({
   );
 }
 
-function ParticipantRow({ participant }: { participant: PanelParticipant }) {
-  const { name, role, isMuted = false, isYou = false } = participant;
+function ParticipantRow({
+  participant,
+  canManage = false,
+  onMute,
+  onRemove,
+}: {
+  participant: PanelParticipant;
+  canManage?: boolean;
+  onMute?: (id: string) => void;
+  onRemove?: (id: string) => void;
+}) {
+  const { id, name, role, isMuted = false, isYou = false } = participant;
 
   return (
     <li className="hover:bg-muted flex items-center gap-3 rounded-lg px-2 py-2 transition-colors">
@@ -96,25 +107,53 @@ function ParticipantRow({ participant }: { participant: PanelParticipant }) {
       {isMuted ? (
         <MicOffIcon aria-label={`${name} is muted`} className="text-destructive size-4" />
       ) : null}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label={`More actions for ${name}`}
-        className="rounded-full"
-      >
-        <MoreVerticalIcon />
-      </Button>
+      {canManage && !isYou ? (
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Mute ${name}`}
+            onClick={() => onMute?.(id)}
+          >
+            <MicOffIcon />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Remove ${name} from the meet`}
+            onClick={() => onRemove?.(id)}
+          >
+            <UserMinusIcon />
+          </Button>
+        </div>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`More actions for ${name}`}
+          className="rounded-full"
+          disabled
+        >
+          <MoreVerticalIcon />
+        </Button>
+      )}
     </li>
   );
 }
 
 function PeoplePanel({
   participants,
+  canManage = false,
+  onMute,
+  onRemove,
   onAddPeople,
   onClose,
   className,
 }: {
   participants: PanelParticipant[];
+  canManage?: boolean;
+  onMute?: (id: string) => void;
+  onRemove?: (id: string) => void;
   onAddPeople?: () => void;
   onClose?: () => void;
   className?: string;
@@ -171,7 +210,13 @@ function PeoplePanel({
           {isGroupOpen ? (
             <ul className="flex flex-col border-t">
               {filtered.map((participant) => (
-                <ParticipantRow key={participant.id} participant={participant} />
+                <ParticipantRow
+                  key={participant.id}
+                  participant={participant}
+                  canManage={canManage}
+                  onMute={onMute}
+                  onRemove={onRemove}
+                />
               ))}
               {filtered.length === 0 ? (
                 <li className="text-muted-foreground px-3 py-4 text-center text-sm">
@@ -188,24 +233,26 @@ function PeoplePanel({
 
 function ChatPanel({
   messages = [],
-  canSend = true,
+  allowChat = true,
+  canManage = false,
   onSend,
-  onToggleCanSend,
+  onToggleAllowChat,
   onClose,
   className,
 }: {
   messages?: ChatMessage[];
-  canSend?: boolean;
+  allowChat?: boolean;
+  canManage?: boolean;
   onSend?: (text: string) => void;
-  onToggleCanSend?: (enabled: boolean) => void;
+  onToggleAllowChat?: (enabled: boolean) => void;
   onClose?: () => void;
   className?: string;
 }) {
   const [draft, setDraft] = React.useState("");
-  const [allowMessages, setAllowMessages] = React.useState(true);
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!allowChat) return;
     const text = draft.trim();
     if (!text) return;
     onSend?.(text);
@@ -216,26 +263,24 @@ function ChatPanel({
     <aside aria-label="In-call messages" className={cn(PANEL_BASE, "min-h-0", className)}>
       <PanelHeader title="In-call messages" onClose={onClose} />
 
-      <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5">
-        <Label htmlFor="allow-messages" className="text-sm font-normal">
-          Let participants send messages
-        </Label>
-        <Switch
-          id="allow-messages"
-          checked={allowMessages}
-          onCheckedChange={(checked) => {
-            setAllowMessages(checked);
-            onToggleCanSend?.(checked);
-          }}
-        />
-      </div>
+      {canManage ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5">
+          <Label htmlFor="allow-messages" className="text-sm font-normal">
+            Let participants send messages
+          </Label>
+          <Switch
+            id="allow-messages"
+            checked={allowChat}
+            onCheckedChange={(checked) => onToggleAllowChat?.(checked)}
+          />
+        </div>
+      ) : null}
 
-      {!allowMessages || !canSend ? (
+      {!allowChat ? (
         <Alert variant="info">
-          <AlertTitle>Continuous chat is turned off</AlertTitle>
+          <AlertTitle>Chat is turned off</AlertTitle>
           <AlertDescription>
-            Messages will not be saved for meeting participants when the call ends. You can pin a
-            message to make it visible for people who join later.
+            The host has turned off chat for everyone in this meet.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -272,13 +317,14 @@ function ChatPanel({
           placeholder="Send a message"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
+          disabled={!allowChat}
         />
         <Button
           type="submit"
           variant="outline"
           size="icon"
           aria-label="Send message"
-          disabled={!draft.trim()}
+          disabled={!draft.trim() || !allowChat}
         >
           <SendIcon />
         </Button>

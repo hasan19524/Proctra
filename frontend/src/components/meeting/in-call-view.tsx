@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
 import { useClock } from "@/hooks/use-clock";
-import type { WsChatMessage, WsParticipant } from "@/hooks/use-meeting-ws";
+import type { MeetingMeta, WsChatMessage, WsParticipant } from "@/hooks/use-meeting-ws";
 import type { WsStatus } from "@/lib/ws";
 import { MeetingControls, UtilityCluster } from "@/components/meeting/meeting-controls";
 import {
@@ -25,7 +25,9 @@ interface InCallViewProps {
   selfUserId: string | null;
   connection: WsStatus;
   messages: WsChatMessage[];
+  meeting: MeetingMeta | null;
   onSendChat: (body: string) => string | null;
+  onHostAction: (action: string, payload?: Record<string, unknown>) => void;
   micOn: boolean;
   cameraOn: boolean;
   onToggleMic: () => void;
@@ -60,7 +62,9 @@ export function InCallView({
   selfUserId,
   connection,
   messages,
+  meeting,
   onSendChat,
+  onHostAction,
   micOn,
   cameraOn,
   onToggleMic,
@@ -76,12 +80,16 @@ export function InCallView({
   });
   const [isReactionsOpen, setReactionsOpen] = React.useState(false);
   const [panel, setPanel] = React.useState<"people" | "chat" | null>(null);
-  const [isLocked, setLocked] = React.useState(false);
+
+  const isLocked = meeting?.is_locked ?? false;
+  const allowChat = meeting?.allow_chat ?? true;
+  const allowReactions = meeting?.allow_reactions ?? true;
 
   const self = React.useMemo(
     () => participants.find((participant) => participant.user_id === selfUserId) ?? null,
     [participants, selfUserId],
   );
+  const isSelfHost = self?.is_host ?? false;
   const others = React.useMemo(
     () => participants.filter((participant) => participant.user_id !== selfUserId),
     [participants, selfUserId],
@@ -158,7 +166,18 @@ export function InCallView({
           <footer className="flex flex-col items-center gap-2 pb-1">
             {isReactionsOpen ? (
               <ReactionBar
-                onReact={(label) => demo(`Reaction sent: ${label}`)}
+                onReact={(label) => {
+                  if (!allowReactions) {
+                    toast.add({
+                      type: "error",
+                      title: "Reactions are turned off",
+                      description: "The host turned off reactions for this meet.",
+                    });
+                    setReactionsOpen(false);
+                    return;
+                  }
+                  demo(`Reaction sent: ${label}`);
+                }}
                 onCollapse={() => setReactionsOpen(false)}
               />
             ) : null}
@@ -188,6 +207,9 @@ export function InCallView({
           <div className="w-96 max-w-full shrink-0">
             <PeoplePanel
               participants={panelParticipants}
+              canManage={isSelfHost}
+              onMute={(id) => onHostAction("mute_participant", { target_id: id })}
+              onRemove={(id) => onHostAction("remove", { target_id: id })}
               onAddPeople={() => demo("Invite people (demo)")}
               onClose={() => setPanel(null)}
               className="h-full"
@@ -199,8 +221,21 @@ export function InCallView({
           <div className="w-96 max-w-full shrink-0">
             <ChatPanel
               messages={messages.map(toPanelMessage)}
+              allowChat={allowChat}
+              canManage={isSelfHost}
+              onToggleAllowChat={(enabled) =>
+                onHostAction("set_permissions", { allow_chat: enabled })
+              }
               onClose={() => setPanel(null)}
               onSend={(text) => {
+                if (!allowChat) {
+                  toast.add({
+                    type: "error",
+                    title: "Chat is turned off",
+                    description: "The host turned off chat for this meet.",
+                  });
+                  return;
+                }
                 if (!onSendChat(text)) {
                   toast.add({
                     type: "error",
@@ -223,8 +258,11 @@ export function InCallView({
         onOpenChat={() => togglePanel("chat")}
         onOpenPeople={() => togglePanel("people")}
         onToggleHostControls={() => {
-          setLocked((locked) => !locked);
-          demo(isLocked ? "Host controls unlocked (demo)" : "Host controls locked (demo)");
+          if (!isSelfHost) {
+            demo("Only the host can lock the meet");
+            return;
+          }
+          onHostAction(isLocked ? "unlock" : "lock");
         }}
       />
     </div>

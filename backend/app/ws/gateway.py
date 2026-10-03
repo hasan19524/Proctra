@@ -1,12 +1,14 @@
-"""Application WebSocket gateway (Phases 4-5).
+"""Application WebSocket gateway (Phases 4-7).
 
 Connect handshake (auth + meeting authorization), versioned envelope loop,
-heartbeat/idle handling, Redis pub/sub fan-out, and durable chat (persist to
-Postgres first, then broadcast — REALTIME.md §1/§3).
+heartbeat/idle handling, Redis pub/sub fan-out, durable chat (persist to
+Postgres first, then broadcast — REALTIME.md §1/§3), host controls, and
+shared notes (whole-document saves broadcast as ``note.updated``).
 """
 
 import asyncio
 import contextlib
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -17,6 +19,7 @@ from app.core.redis import get_pubsub_client, get_redis
 from app.db import SessionLocal
 from app.models.meeting import Meeting
 from app.models.message import MAX_BODY_LENGTH
+from app.models.note import MAX_NOTE_CONTENT_CHARS, VISIBILITIES, VISIBILITY_HOST_ONLY
 from app.models.user import User
 from app.services.auth_service import get_user_from_token
 from app.services.meeting_service import (
@@ -30,6 +33,7 @@ from app.services.message_service import (
     list_recent_messages,
     message_dto,
 )
+from app.services.note_service import list_notes, note_dto, upsert_note
 from app.services.participant_service import record_join, record_leave
 from app.ws import presence
 from app.ws.envelope import (
@@ -81,6 +85,24 @@ async def _send(websocket: WebSocket, frame_text: str) -> None:
         await websocket.send_text(frame_text)
 
 
+def _is_host_only_note(frame_text: str) -> bool:
+    """True when this broadcast frame carries a host-only notes document."""
+    if '"note.updated"' not in frame_text:
+        return False
+    try:
+        payload = json.loads(frame_text).get("payload") or {}
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return isinstance(payload, dict) and payload.get("visibility") == VISIBILITY_HOST_ONLY
+
+
+async def _deliver(conn: "LocalConnection", frame_text: str) -> None:
+    """Send one broadcast frame to a local connection, honoring visibility."""
+    if _is_host_only_note(frame_text) and not conn.is_host:
+        return
+    await _send(conn.websocket, frame_text)
+
+
 async def _broadcast(meeting_code: str, frame_text: str) -> None:
     """Publish a frame to every worker (and thus every connection) in the meeting."""
     try:
@@ -88,7 +110,7 @@ async def _broadcast(meeting_code: str, frame_text: str) -> None:
     except Exception:
         registry = get_registry()
         for conn in registry.in_meeting(meeting_code):
-            await _send(conn.websocket, frame_text)
+            await _deliver(conn, frame_text)
 
 
 async def _relay(websocket: WebSocket, meeting_code: str, conn_id: str, pubsub: Any) -> None:
@@ -103,6 +125,8 @@ async def _relay(websocket: WebSocket, meeting_code: str, conn_id: str, pubsub: 
             conn = get_registry().get(conn_id)
             if conn is None or conn.closed:
                 break
+            if _is_host_only_note(data) and not conn.is_host:
+                continue
             await _send(websocket, data)
     except asyncio.CancelledError:
         raise
@@ -111,11 +135,13 @@ async def _relay(websocket: WebSocket, meeting_code: str, conn_id: str, pubsub: 
 
 
 async def _snapshot(meeting_code: str, meeting: Meeting, user_id: str) -> str:
-    """Build the ``sync.state`` full snapshot frame (participants + chat tail)."""
+    """Build the ``sync.state`` full snapshot frame (roster, chat tail, notes)."""
     participants = await presence.get_presence(meeting_code)
+    is_host = str(meeting.host_id) == user_id
     async with SessionLocal() as session:
         row = await session.get(Meeting, meeting.id)
         recent = await list_recent_messages(session, meeting.id)
+        notes = await list_notes(session, meeting.id, include_host_only=is_host)
     current = row or meeting  # re-read so lock/permission changes are visible
     return server_frame(
         "sync.state",
@@ -132,6 +158,7 @@ async def _snapshot(meeting_code: str, meeting: Meeting, user_id: str) -> str:
             "self": {"user_id": user_id},
             "participants": participants,
             "messages": [message_dto(message, sender) for message, sender in recent],
+            "notes": [note_dto(note, name) for note, name in notes],
             "seq": await current_seq(meeting_code),
         },
     )
@@ -238,6 +265,55 @@ async def _handle_chat_send(
     await _broadcast(
         meeting_code,
         server_frame("chat.message", message_dto(message, user.display_name), seq=message.seq),
+    )
+
+
+async def _handle_note_save(
+    websocket: WebSocket,
+    meeting_code: str,
+    meeting: Meeting,
+    user: User,
+    frame: Any,
+) -> None:
+    """Persist one notes document (whole-content replace), then broadcast.
+
+    ``host_only`` documents are host-only in both directions: only the host
+    may save one, and non-hosts never receive one in ``sync.state``.
+    """
+    payload = frame.payload if isinstance(frame.payload, dict) else {}
+    visibility = payload.get("visibility", "all")
+    if visibility not in VISIBILITIES:
+        await _send_ws_error(websocket, "invalid_note", "visibility must be all or host_only")
+        return
+    content = payload.get("content")
+    if not isinstance(content, dict):
+        await _send_ws_error(websocket, "invalid_note", "content must be a JSON object")
+        return
+    if len(json.dumps(content)) > MAX_NOTE_CONTENT_CHARS:
+        await _send_ws_error(
+            websocket, "invalid_note", f"Note must be at most {MAX_NOTE_CONTENT_CHARS} characters"
+        )
+        return
+    if visibility == VISIBILITY_HOST_ONLY and str(meeting.host_id) != str(user.id):
+        await _send_ws_error(websocket, "permission_denied", "Host role required")
+        return
+
+    try:
+        async with SessionLocal() as session:
+            note = await upsert_note(
+                session,
+                meeting_id=meeting.id,
+                visibility=visibility,
+                content=content,
+                updated_by=user.id,
+            )
+    except Exception:
+        await _send_ws_error(websocket, "internal_error", "Could not save the note", retryable=True)
+        return
+
+    await _broadcast(
+        meeting_code,
+        server_frame("note.updated", note_dto(note, user.display_name)),
     )
 
 
@@ -565,6 +641,8 @@ async def _serve(
                 )
         elif frame.type == "chat.send":
             await _handle_chat_send(websocket, meeting_code, meeting, user, frame)
+        elif frame.type == "note.save":
+            await _handle_note_save(websocket, meeting_code, meeting, user, frame)
         elif frame.type == "host.action":
             await _handle_host_action(websocket, meeting_code, meeting, user, frame, conn)
         else:

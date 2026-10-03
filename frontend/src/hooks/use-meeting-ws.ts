@@ -35,6 +35,15 @@ export interface MeetingMeta {
 
 export type NoteVisibility = "all" | "host_only";
 
+/** One transient reaction (never persisted; expires client-side). */
+export interface WsReaction {
+  id: number;
+  user_id: string;
+  name: string;
+  label: string;
+  at: number;
+}
+
 export interface WsNote {
   id: string;
   meeting_id: string;
@@ -71,6 +80,16 @@ interface ParticipantEventPayload {
   user_id: string;
   by_user_id?: string;
 }
+
+interface ReactionPayload {
+  user_id?: string;
+  name?: string;
+  label?: string;
+}
+
+const REACTION_TTL_MS = 5_000;
+const REACTION_MAX_KEPT = 20;
+let reactionSeq = 0;
 
 export interface ParticipantFlags {
   mic_on?: boolean;
@@ -109,6 +128,7 @@ export function useMeetingWs(code: string | null) {
   const [messages, setMessages] = React.useState<WsChatMessage[]>([]);
   const [meeting, setMeeting] = React.useState<MeetingMeta | null>(null);
   const [notes, setNotes] = React.useState<WsNote[]>([]);
+  const [reactions, setReactions] = React.useState<WsReaction[]>([]);
   const [isRemoved, setIsRemoved] = React.useState(false);
   const [selfMuteNonce, setSelfMuteNonce] = React.useState(0);
   const socketRef = React.useRef<MeetingSocket | null>(null);
@@ -185,6 +205,22 @@ export function useMeetingWs(code: string | null) {
           return [...rest, payload].sort((a, b) => a.visibility.localeCompare(b.visibility));
         });
       }),
+      socket.on<ReactionPayload>("reaction.received", (payload) => {
+        if (!payload?.user_id || !payload.label) return;
+        const at = Date.now();
+        const incoming: WsReaction = {
+          id: reactionSeq++,
+          user_id: payload.user_id,
+          name: payload.name ?? "",
+          label: payload.label,
+          at,
+        };
+        setReactions((current) =>
+          [...current, incoming]
+            .filter((reaction) => at - reaction.at < REACTION_TTL_MS)
+            .slice(-REACTION_MAX_KEPT),
+        );
+      }),
     ];
 
     socket.connect();
@@ -216,6 +252,11 @@ export function useMeetingWs(code: string | null) {
     [],
   );
 
+  /** Fire one transient reaction; returns the frame id or null when offline. */
+  const sendReaction = React.useCallback((label: string): string | null => {
+    return socketRef.current?.send("reaction.send", { label }) ?? null;
+  }, []);
+
   /**
    * Send a chat message. Returns the idempotency key when queued/sent, or
    * `null` when the socket is closed or the text is blank.
@@ -234,11 +275,13 @@ export function useMeetingWs(code: string | null) {
     messages,
     meeting,
     notes,
+    reactions,
     isRemoved,
     selfMuteNonce,
     updateFlags,
     sendChat,
     sendHostAction,
     sendNoteSave,
+    sendReaction,
   };
 }

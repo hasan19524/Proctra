@@ -10,6 +10,7 @@ import type {
   WsChatMessage,
   WsNote,
   WsParticipant,
+  WsReaction,
 } from "@/hooks/use-meeting-ws";
 import type { WsStatus } from "@/lib/ws";
 import { MeetingControls, UtilityCluster } from "@/components/meeting/meeting-controls";
@@ -21,7 +22,7 @@ import {
   type PanelParticipant,
 } from "@/components/meeting/meeting-panels";
 import { ParticipantTile } from "@/components/meeting/participant-tile";
-import { ReactionBar } from "@/components/meeting/reaction-bar";
+import { ReactionBar, REACTIONS } from "@/components/meeting/reaction-bar";
 import { MeetingTopBar } from "@/components/meeting/meeting-top-bar";
 import type { MeetingStatus } from "@/components/meeting/status-indicator";
 
@@ -34,11 +35,15 @@ interface InCallViewProps {
   messages: WsChatMessage[];
   meeting: MeetingMeta | null;
   notes: WsNote[];
+  reactions: WsReaction[];
   onSendChat: (body: string) => string | null;
   onSendNote: (visibility: NoteVisibility, text: string) => string | null;
+  onSendReaction: (label: string) => string | null;
   onHostAction: (action: string, payload?: Record<string, unknown>) => void;
   micOn: boolean;
   cameraOn: boolean;
+  isHandRaised: boolean;
+  onToggleHand: () => void;
   onToggleMic: () => void;
   onToggleCamera: () => void;
   onLeave: () => void;
@@ -73,11 +78,15 @@ export function InCallView({
   messages,
   meeting,
   notes,
+  reactions,
   onSendChat,
   onSendNote,
+  onSendReaction,
   onHostAction,
   micOn,
   cameraOn,
+  isHandRaised,
+  onToggleHand,
   onToggleMic,
   onToggleCamera,
   onLeave,
@@ -87,7 +96,6 @@ export function InCallView({
 
   const [state, setState] = React.useState({
     isScreenSharing: false,
-    isHandRaised: false,
   });
   const [isReactionsOpen, setReactionsOpen] = React.useState(false);
   const [panel, setPanel] = React.useState<"people" | "chat" | "notes" | null>(null);
@@ -145,6 +153,7 @@ export function InCallView({
               isMuted={!micOn}
               isCameraOff={!cameraOn}
               isScreenSharing={state.isScreenSharing}
+              isHandRaised={isHandRaised}
               isHost={self?.is_host ?? true}
               connection="excellent"
               className="h-full w-full"
@@ -175,6 +184,7 @@ export function InCallView({
           )}
 
           <footer className="flex flex-col items-center gap-2 pb-1">
+            <FloatingReactions reactions={reactions} />
             {isReactionsOpen ? (
               <ReactionBar
                 onReact={(label) => {
@@ -187,7 +197,13 @@ export function InCallView({
                     setReactionsOpen(false);
                     return;
                   }
-                  demo(`Reaction sent: ${label}`);
+                  if (!onSendReaction(label)) {
+                    toast.add({
+                      type: "error",
+                      title: "Reaction not sent",
+                      description: "You are not connected — it will send after reconnect.",
+                    });
+                  }
                 }}
                 onCollapse={() => setReactionsOpen(false)}
               />
@@ -197,7 +213,7 @@ export function InCallView({
                 isMicOn: micOn,
                 isCameraOn: cameraOn,
                 isScreenSharing: state.isScreenSharing,
-                isHandRaised: state.isHandRaised,
+                isHandRaised,
               }}
               isReactionsOpen={isReactionsOpen}
               onToggleMic={onToggleMic}
@@ -205,7 +221,7 @@ export function InCallView({
               onToggleScreenShare={() =>
                 setState((s) => ({ ...s, isScreenSharing: !s.isScreenSharing }))
               }
-              onToggleHand={() => setState((s) => ({ ...s, isHandRaised: !s.isHandRaised }))}
+              onToggleHand={onToggleHand}
               onOpenChat={() => togglePanel("chat")}
               onToggleReactions={() => setReactionsOpen((open) => !open)}
               onMoreAction={(action) => {
@@ -309,3 +325,31 @@ export function InCallView({
     </div>
   );
 }
+
+function FloatingReactions({ reactions }: { reactions: WsReaction[] }) {
+  if (reactions.length === 0) return null;
+  return (
+    <div
+      aria-label="Reactions"
+      aria-live="polite"
+      className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex items-end justify-center gap-4"
+    >
+      {reactions.map((reaction, index) => (
+        <div
+          key={reaction.id}
+          className="reaction-float flex flex-col items-center"
+          style={{ animationDelay: `${(index % 4) * 150}ms` }}
+        >
+          <span className="text-4xl" aria-hidden="true">
+            {REACTIONS.find((item) => item.label === reaction.label)?.emoji ?? "👍"}
+          </span>
+          <span className="bg-card/80 text-muted-foreground rounded-full px-2 py-0.5 text-xs">
+            {reaction.name}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export { FloatingReactions };

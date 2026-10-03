@@ -181,3 +181,21 @@
     scroll-behavior: auto !important;
   }
 }
+
+@keyframes reaction-float {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-112px);
+    opacity: 0;
+  }
+}
+
+.reaction-float {
+  animation: reaction-float 4s ease-out forwards;
+}

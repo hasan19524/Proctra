@@ -33,13 +33,20 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
     messages,
     meeting,
     notes,
+    reactions,
     isRemoved,
     selfMuteNonce,
     updateFlags,
     sendChat,
     sendHostAction,
     sendNoteSave,
+    sendReaction,
   } = useMeetingWs(code);
+
+  // Hand raise is server state: the flag round-trips through presence so
+  // everyone (including a reconnecting you) sees the same hand.
+  const self = participants.find((participant) => participant.user_id === selfUserId) ?? null;
+  const isHandRaised = self?.hand_raised ?? false;
 
   // Host muted me: turn the mic off locally (render-phase adjustment, the
   // documented React pattern for deriving state from a prop/event).
@@ -77,11 +84,15 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       messages={messages}
       meeting={meeting}
       notes={notes}
+      reactions={reactions}
       onSendChat={sendChat}
       onSendNote={(visibility, text) => sendNoteSave(visibility, { text })}
+      onSendReaction={sendReaction}
       onHostAction={sendHostAction}
       micOn={isMicOn}
       cameraOn={isCameraOn}
+      isHandRaised={isHandRaised}
+      onToggleHand={() => updateFlags({ hand_raised: !isHandRaised })}
       onToggleMic={() => setIsMicOn((on) => !on)}
       onToggleCamera={() => setIsCameraOn((on) => !on)}
       onLeave={onLeave}

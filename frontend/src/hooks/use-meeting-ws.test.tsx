@@ -370,3 +370,54 @@ describe("useMeetingWs notes", () => {
     expect(save?.payload.content).toEqual({ text: "hello notes" });
   });
 });
+
+describe("useMeetingWs reactions", () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", MockWebSocket);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("appends reaction.received frames with sender identity", async () => {
+    const { result } = renderHook(() => useMeetingWs("abc-def-ghi"));
+    await act(async () => {
+      MockWebSocket.last().serverOpen();
+      MockWebSocket.last().serverMessage({
+        v: 1,
+        type: "reaction.received",
+        id: "r1",
+        ts: "2026-10-03T12:00:00.000Z",
+        payload: { user_id: "u2", name: "Amina Yusuf", label: "Party" },
+      });
+    });
+
+    expect(result.current.reactions).toHaveLength(1);
+    expect(result.current.reactions[0].name).toBe("Amina Yusuf");
+    expect(result.current.reactions[0].label).toBe("Party");
+    expect(result.current.reactions[0].at).toBeGreaterThan(0);
+  });
+
+  it("sendReaction frames reaction.send with the label", async () => {
+    const { result } = renderHook(() => useMeetingWs("abc-def-ghi"));
+    await act(async () => {
+      MockWebSocket.last().serverOpen();
+    });
+
+    let frameId: string | null = null;
+    act(() => {
+      frameId = result.current.sendReaction("Thumbs up");
+    });
+    expect(frameId).toBeTruthy();
+
+    const frames = MockWebSocket.last().sent.map(
+      (raw) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> },
+    );
+    const send = frames.find((frame) => frame.type === "reaction.send");
+    expect(send).toBeDefined();
+    expect(send?.payload.label).toBe("Thumbs up");
+  });
+});

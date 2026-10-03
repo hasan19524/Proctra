@@ -1,9 +1,12 @@
 """Versioned API routers (v1).
 
-Phase 0: none yet. Later phases mount here:
-  auth (Phase 2), meetings (Phase 4), participants, chat, notes, history.
+Mounts: auth (Phase 2). Later phases add meetings, participants, chat, notes,
+history.
 """
 
 from fastapi import APIRouter
 
+from app.api.v1.auth import router as auth_router
+
 router = APIRouter()
+router.include_router(auth_router)

@@ -4,6 +4,8 @@ import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
 import { useClock } from "@/hooks/use-clock";
+import type { WsParticipant } from "@/hooks/use-meeting-ws";
+import type { WsStatus } from "@/lib/ws";
 import { MeetingControls, UtilityCluster } from "@/components/meeting/meeting-controls";
 import {
   ChatPanel,
@@ -14,32 +16,44 @@ import {
 import { ParticipantTile } from "@/components/meeting/participant-tile";
 import { ReactionBar } from "@/components/meeting/reaction-bar";
 import { MeetingTopBar } from "@/components/meeting/meeting-top-bar";
+import type { MeetingStatus } from "@/components/meeting/status-indicator";
 
 interface InCallViewProps {
   code: string;
   displayName: string;
+  participants: WsParticipant[];
+  selfUserId: string | null;
+  connection: WsStatus;
   micOn: boolean;
   cameraOn: boolean;
+  onToggleMic: () => void;
+  onToggleCamera: () => void;
   onLeave: () => void;
 }
 
-function buildParticipants(youName: string): PanelParticipant[] {
-  return [
-    { id: "you", name: youName, role: "Meeting host", isMuted: false, isYou: true },
-    { id: "amina", name: "Amina Yusuf", role: "Contributor" },
-    { id: "carlos", name: "Carlos Mendes", role: "Contributor", isMuted: true },
-    { id: "priya", name: "Priya Nair", role: "Contributor" },
-  ];
+function toTopBarStatus(status: WsStatus): MeetingStatus | undefined {
+  if (status === "closed") return undefined;
+  if (status === "open") return "connected";
+  return status;
 }
 
 /** The in-call shell: top bar, tiles, controls, panels (Phase 1 layout). */
-export function InCallView({ code, displayName, micOn, cameraOn, onLeave }: InCallViewProps) {
+export function InCallView({
+  code,
+  displayName,
+  participants,
+  selfUserId,
+  connection,
+  micOn,
+  cameraOn,
+  onToggleMic,
+  onToggleCamera,
+  onLeave,
+}: InCallViewProps) {
   const now = useClock();
   const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   const [state, setState] = React.useState({
-    isMicOn: micOn,
-    isCameraOn: cameraOn,
     isScreenSharing: false,
     isHandRaised: false,
   });
@@ -48,7 +62,26 @@ export function InCallView({ code, displayName, micOn, cameraOn, onLeave }: InCa
   const [isLocked, setLocked] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
 
-  const participants = React.useMemo(() => buildParticipants(displayName), [displayName]);
+  const self = React.useMemo(
+    () => participants.find((participant) => participant.user_id === selfUserId) ?? null,
+    [participants, selfUserId],
+  );
+  const others = React.useMemo(
+    () => participants.filter((participant) => participant.user_id !== selfUserId),
+    [participants, selfUserId],
+  );
+
+  const panelParticipants = React.useMemo<PanelParticipant[]>(
+    () =>
+      participants.map((participant) => ({
+        id: participant.user_id,
+        name: participant.name,
+        role: participant.is_host ? "Meeting host" : "Contributor",
+        isMuted: !participant.mic_on,
+        isYou: participant.user_id === selfUserId,
+      })),
+    [participants, selfUserId],
+  );
 
   const demo = React.useCallback((message: string) => {
     toast.add({ type: "info", title: message });
@@ -63,6 +96,7 @@ export function InCallView({ code, displayName, micOn, cameraOn, onLeave }: InCa
       <MeetingTopBar
         code={code}
         time={time}
+        connection={toTopBarStatus(connection)}
         participantCount={participants.length}
         onShowDetails={() => demo("Meeting details (demo)")}
         onOpenPeople={() => togglePanel("people")}
@@ -72,32 +106,38 @@ export function InCallView({ code, displayName, micOn, cameraOn, onLeave }: InCa
         <main className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="min-h-0 flex-1">
             <ParticipantTile
-              name={`${displayName} (You)`}
-              isMuted={!state.isMicOn}
-              isCameraOff={!state.isCameraOn}
+              name={`${self?.name ?? displayName} (You)`}
+              isMuted={!micOn}
+              isCameraOff={!cameraOn}
               isScreenSharing={state.isScreenSharing}
-              isHost
+              isHost={self?.is_host ?? true}
               connection="excellent"
               className="h-full w-full"
             />
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <ParticipantTile name="Amina Yusuf" isSpeaking connection="good" className="w-52" />
-            <ParticipantTile
-              name="Carlos Mendes"
-              isMuted
-              isCameraOff
-              connection="fair"
-              className="w-52"
-            />
-            <ParticipantTile
-              name="Priya Nair"
-              isHandRaised
-              connection="excellent"
-              className="w-52"
-            />
-          </div>
+          {others.length > 0 ? (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {others.map((participant) => (
+                <ParticipantTile
+                  key={participant.user_id}
+                  name={participant.name}
+                  isMuted={!participant.mic_on}
+                  isCameraOff={!participant.camera_on}
+                  isHandRaised={participant.hand_raised}
+                  isHost={participant.is_host}
+                  connection="excellent"
+                  className="w-52"
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-center text-xs">
+              {connection === "open"
+                ? `Waiting for others to join — share code ${code}`
+                : "Waiting for connection…"}
+            </p>
+          )}
 
           <footer className="flex flex-col items-center gap-2 pb-1">
             {isReactionsOpen ? (
@@ -107,10 +147,15 @@ export function InCallView({ code, displayName, micOn, cameraOn, onLeave }: InCa
               />
             ) : null}
             <MeetingControls
-              state={state}
+              state={{
+                isMicOn: micOn,
+                isCameraOn: cameraOn,
+                isScreenSharing: state.isScreenSharing,
+                isHandRaised: state.isHandRaised,
+              }}
               isReactionsOpen={isReactionsOpen}
-              onToggleMic={() => setState((s) => ({ ...s, isMicOn: !s.isMicOn }))}
-              onToggleCamera={() => setState((s) => ({ ...s, isCameraOn: !s.isCameraOn }))}
+              onToggleMic={onToggleMic}
+              onToggleCamera={onToggleCamera}
               onToggleScreenShare={() =>
                 setState((s) => ({ ...s, isScreenSharing: !s.isScreenSharing }))
               }
@@ -126,7 +171,7 @@ export function InCallView({ code, displayName, micOn, cameraOn, onLeave }: InCa
         {panel === "people" ? (
           <div className="w-96 max-w-full shrink-0">
             <PeoplePanel
-              participants={participants}
+              participants={panelParticipants}
               onAddPeople={() => demo("Invite people (demo)")}
               onClose={() => setPanel(null)}
               className="h-full"

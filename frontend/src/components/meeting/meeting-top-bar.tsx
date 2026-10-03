@@ -1,12 +1,14 @@
 import { InfoIcon, UsersIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { StatusIndicator, type MeetingStatus } from "@/components/meeting/status-indicator";
 import { cn } from "cn";
 
 function MeetingTopBar({
   code,
   time,
   participantCount,
+  connection,
   onShowDetails,
   onOpenPeople,
   className,
@@ -14,6 +16,7 @@ function MeetingTopBar({
   code: string;
   time: string;
   participantCount: number;
+  connection?: MeetingStatus;
   onShowDetails?: () => void;
   onOpenPeople?: () => void;
   className?: string;
@@ -33,6 +36,7 @@ function MeetingTopBar({
           |
         </span>
         <span className="truncate font-mono">{code}</span>
+        {connection ? <StatusIndicator status={connection} /> : null}
         <Button variant="ghost" size="icon-sm" aria-label="Meeting details" onClick={onShowDetails}>
           <InfoIcon />
         </Button>

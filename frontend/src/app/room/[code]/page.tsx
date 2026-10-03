@@ -6,7 +6,7 @@ import Link from "next/link";
 
 import { ApiError, meetingsApi, type Meeting } from "@/lib/api";
 import { RequireSession, useSession } from "@/components/auth/session-context";
-import { InCallView } from "@/components/meeting/in-call-view";
+import { InCallSession } from "@/components/meeting/in-call-session";
 import { PreJoinLobby, type JoinOptions } from "@/components/meeting/prejoin-lobby";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -121,7 +121,7 @@ function RoomGate({ code }: RoomParams) {
   }
 
   return (
-    <InCallView
+    <InCallSession
       code={meeting.code}
       displayName={join.displayName}
       micOn={join.micOn}

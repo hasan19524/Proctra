@@ -1,14 +1,13 @@
-"""Application WebSocket gateway (Phase 4).
+"""Application WebSocket gateway (Phases 4-5).
 
 Connect handshake (auth + meeting authorization), versioned envelope loop,
-heartbeat/idle handling and Redis pub/sub fan-out. Per REALTIME.md §1.
-
-Layering: this module validates input and orchestrates; presence/registry/
-fan-out live in their own modules so Phase 5+ handlers stay thin.
+heartbeat/idle handling, Redis pub/sub fan-out, and durable chat (persist to
+Postgres first, then broadcast — REALTIME.md §1/§3).
 """
 
 import asyncio
 import contextlib
+import uuid
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -16,12 +15,19 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from app.core.redis import get_pubsub_client, get_redis
 from app.db import SessionLocal
 from app.models.meeting import Meeting
+from app.models.message import MAX_BODY_LENGTH
 from app.models.user import User
 from app.services.auth_service import get_user_from_token
 from app.services.meeting_service import (
     MeetingNotFoundError,
     get_meeting_by_code,
     normalize_code,
+)
+from app.services.message_service import (
+    create_message,
+    list_messages_after,
+    list_recent_messages,
+    message_dto,
 )
 from app.ws import presence
 from app.ws.envelope import (
@@ -34,12 +40,14 @@ from app.ws.envelope import (
     server_frame,
 )
 from app.ws.registry import get_registry
-from app.ws.seq import current_seq
+from app.ws.seq import current_seq, next_seq
 
 router = APIRouter()
 
 # The client pings every 25 s (REALTIME.md); no frame for this long = dead peer.
 IDLE_TIMEOUT_SECONDS = 60.0
+# Upper bound for one reconnect replay (the snapshot also carries a 50-msg tail).
+REPLAY_LIMIT = 500
 
 
 def _channel(meeting_code: str) -> str:
@@ -94,8 +102,10 @@ async def _relay(websocket: WebSocket, meeting_code: str, conn_id: str, pubsub: 
 
 
 async def _snapshot(meeting_code: str, meeting: Meeting, user_id: str) -> str:
-    """Build the ``sync.state`` full snapshot frame."""
+    """Build the ``sync.state`` full snapshot frame (participants + chat tail)."""
     participants = await presence.get_presence(meeting_code)
+    async with SessionLocal() as session:
+        recent = await list_recent_messages(session, meeting.id)
     return server_frame(
         "sync.state",
         {
@@ -107,8 +117,99 @@ async def _snapshot(meeting_code: str, meeting: Meeting, user_id: str) -> str:
             },
             "self": {"user_id": user_id},
             "participants": participants,
+            "messages": [message_dto(message, sender) for message, sender in recent],
             "seq": await current_seq(meeting_code),
         },
+    )
+
+
+async def _replay_chat(websocket: WebSocket, meeting: Meeting, last_seq: int) -> None:
+    """Re-send durable chat frames with ``seq > last_seq`` (REALTIME.md §3).
+
+    ``last_seq == 0`` means a fresh join — the snapshot's tail already carries
+    recent history, so only true reconnects trigger a Postgres replay.
+    """
+    if last_seq <= 0:
+        return
+    async with SessionLocal() as session:
+        missed = await list_messages_after(session, meeting.id, last_seq, limit=REPLAY_LIMIT)
+    for message, sender in missed:
+        await _send(
+            websocket,
+            server_frame("chat.message", message_dto(message, sender), seq=message.seq),
+        )
+
+
+def _parse_uuid(value: object) -> uuid.UUID | None:
+    if isinstance(value, str):
+        try:
+            return uuid.UUID(value)
+        except ValueError:
+            return None
+    return None
+
+
+async def _handle_chat_send(
+    websocket: WebSocket,
+    meeting_code: str,
+    meeting: Meeting,
+    user: User,
+    frame: Any,
+) -> None:
+    """Persist a chat message (idempotent per ``client_id``), then broadcast."""
+    payload = frame.payload if isinstance(frame.payload, dict) else {}
+    body = payload.get("body")
+    body = body.strip() if isinstance(body, str) else ""
+    if not body or len(body) > MAX_BODY_LENGTH:
+        await _send(
+            websocket,
+            server_frame(
+                "error",
+                {
+                    "code": "invalid_message",
+                    "message": f"Message body must be 1-{MAX_BODY_LENGTH} characters",
+                    "retryable": False,
+                },
+            ),
+        )
+        return
+
+    client_id = payload.get("client_id")
+    if not isinstance(client_id, str) or not client_id.strip():
+        client_id = None
+    reply_to = _parse_uuid(payload.get("reply_to"))
+
+    seq = await next_seq(meeting_code)
+    try:
+        async with SessionLocal() as session:
+            message, _created = await create_message(
+                session,
+                meeting_id=meeting.id,
+                sender_id=user.id,
+                sender_name=user.display_name,
+                body=body,
+                seq=seq,
+                client_id=client_id,
+                reply_to=reply_to,
+            )
+    except Exception:
+        await _send(
+            websocket,
+            server_frame(
+                "error",
+                {
+                    "code": "internal_error",
+                    "message": "Could not save the message",
+                    "retryable": True,
+                },
+            ),
+        )
+        return
+
+    # Broadcast even on idempotent retries: at-least-once delivery.
+    await _broadcast(
+        meeting_code,
+        server_frame("chat.message", message_dto(message, user.display_name), seq=message.seq),
     )
 
 
@@ -237,6 +338,12 @@ async def _serve(
             await _send(websocket, server_frame("pong", {"id": frame.id}))
         elif frame.type == "sync":
             await _send(websocket, await _snapshot(meeting_code, meeting, str(user.id)))
+            last_seq = 0
+            if isinstance(frame.payload, dict):
+                raw_last_seq = frame.payload.get("last_seq")
+                if isinstance(raw_last_seq, int) and raw_last_seq >= 0:
+                    last_seq = raw_last_seq
+            await _replay_chat(websocket, meeting, last_seq)
         elif frame.type == "presence.update":
             updated = await presence.update_flags(meeting_code, str(user.id), flags=frame.payload)
             if updated is not None:
@@ -247,6 +354,8 @@ async def _serve(
                         {"participants": await presence.get_presence(meeting_code)},
                     ),
                 )
+        elif frame.type == "chat.send":
+            await _handle_chat_send(websocket, meeting_code, meeting, user, frame)
         else:
             await _send(
                 websocket,

@@ -402,3 +402,40 @@ letting the client forge grants.
 off new tokens even for open sockets of past tabs), the secret never reaches
 the browser, and swapping SFU vendors means changing only the token service
 and `useLiveKitRoom`.
+
+---
+
+## D20 - Screen share: roster flag over the app socket, media over LiveKit
+
+**Status:** Accepted (2026-10-04, Phase 10)
+
+**Context.** Like chat vs. media in D19, screen sharing has two halves: the
+SFU publication (real pixels) and the social signal (who is presenting,
+is the host allowing it). They must agree without introducing a third
+transport.
+
+**Decision.**
+- Media: the sharer publishes `Track.Source.ScreenShare` through the existing
+  LiveKit room; `useLiveKitRoom.toggleScreenShare()` resolves to the new
+  on/off state (null when the browser picker is declined or the room is not
+  ready) and "am I sharing" is *derived* from the local publication - the OS
+  can stop a share outside our UI (ESC, OS shortcut), so mirrored state would
+  lie.
+- Signal: `presence.update {screen_share_on}` rides the app socket like
+  mic/hand flags (default false, boolean-only merge). The gateway re-reads
+  the meeting row before accepting `screen_share_on: true` - a connection-scoped
+  Meeting is stale the moment a host flips `set_permissions`, which is the
+  same fresh-read pattern chat and reactions already use.
+- Enforcement is layered: the button shows a toast and does nothing when
+  `allow_screen_share` is off, the server rejects the roster flag with
+  `permission_denied`, and if the host disables mid-share an effect
+  force-stops the local publication (fires once per disable) so pixels and
+  permission cannot drift apart.
+- UI: an active share promotes to the main stage ("X is presenting"); every
+  camera - including the presenter's - moves to the strip. The presenter is
+  found by identity in the WS roster, keeping D19's two-roster rule.
+
+**Consequences.** Host permission is enforced at every layer that matters
+without LiveKit server-side webhooks; a declined OS prompt costs a toast, not
+a desync; and "who is presenting" survives reconnects because it lives in the
+presence snapshot.

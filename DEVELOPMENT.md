@@ -111,7 +111,7 @@ boundary.
 | 7 — Notes | ✅ done |
 | 8 — Reactions + hand raise (real) | ✅ done |
 | 9 — LiveKit real audio/video | ✅ done |
-| 10 — Screen sharing | ⬜ |
+| 10 — Screen sharing | ✅ done |
 | 11 — Complete meeting experience | ⬜ |
 | 12 — Failure + reconnection | ⬜ |
 | 13 — Security hardening | ⬜ |

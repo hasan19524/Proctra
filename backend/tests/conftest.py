@@ -82,6 +82,7 @@ async def clean_state() -> AsyncIterator[None]:
 
     redis = get_redis()
     keys = [key async for key in redis.scan_iter("ratelimit:*")]
+    keys += [key async for key in redis.scan_iter("ws:*")]
     if keys:
         await redis.delete(*keys)
 

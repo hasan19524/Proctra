@@ -107,7 +107,7 @@ boundary.
 | 3 — Meeting creation, join, pre-join lobby | ✅ done |
 | 4 — Real-time WS core (FastAPI + Redis + PG) | ✅ done |
 | 5 — Chat | ✅ done |
-| 6 — Participant management + host controls | ⬜ |
+| 6 — Participant management + host controls | ✅ done |
 | 7 — Notes | ⬜ |
 | 8 — Reactions + hand raise (real) | ⬜ |
 | 9 — LiveKit real audio/video | ⬜ |

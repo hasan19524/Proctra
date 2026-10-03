@@ -275,3 +275,34 @@ already has.
 **Consequences.** Chat survives transient network loss and duplicated
 delivery without unbounded history dumps; deletion (`chat.deleted`) arrives
 with host controls in Phase 6.
+---
+
+## D16 - Host controls: DB authority, terminal frames before kick, presence attendance
+
+**Status:** Accepted (2026-10-04, Phase 6)
+
+**Context.** Host actions (lock/end, mute, remove, permissions) must be
+authoritative, race-free, and survive multi-worker fan-out. Application-initiated
+disconnects also have to be observable by tests and by the removed client.
+
+**Decision.**
+- Every `host.action` re-derives the caller's role from Postgres inside a fresh
+  session (never the handshake copy); failures return `forbidden`,
+  `invalid_target`, `not_found`, or `unknown_action`.
+- Terminal frames are *direct-sent to local sockets before* `kick` + close
+  (4003): `kick: asyncio.Event` on `LocalConnection` wakes a pending
+  `websocket.receive` (the ASGI test client does not wake it on app-initiated
+  close), then the same frame is published on pub/sub for other workers —
+  clients treat `meeting.ended`/`participant.removed` idempotently.
+- "Remove" disconnects only (Meet parity): a removed user can rejoin while the
+  meeting is unlocked. Attendance is persisted per join/leave in
+  `meeting_participants`; waiting-room admission, chat deletion, and audit logs
+  are deferred to Phase 13.
+- Per-meeting permissions (`allow_chat`/`allow_reactions`/`allow_screen_share`,
+  default true) live on `meetings`, are enforced server-side on the matching
+  action, and broadcast as `permission.changed`.
+
+**Consequences.** Lock/end/remove behave identically across workers and are
+covered by an in-suite WS test client plus the real-socket smoke; the frontend
+derives its gates from `sync.state.meeting` plus those broadcasts instead of
+optimistic local state.

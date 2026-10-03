@@ -76,7 +76,9 @@ async def clean_state() -> AsyncIterator[None]:
     from app.db import engine
 
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE TABLE refresh_tokens, users RESTART IDENTITY CASCADE"))
+        await conn.execute(
+            text("TRUNCATE TABLE refresh_tokens, meetings, users RESTART IDENTITY CASCADE")
+        )
 
     redis = get_redis()
     keys = [key async for key in redis.scan_iter("ratelimit:*")]

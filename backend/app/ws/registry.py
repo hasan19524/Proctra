@@ -4,8 +4,9 @@ Cross-worker delivery goes through Redis pub/sub; this registry only tracks
 sockets owned by *this* process. Ephemeral by design — never persisted.
 """
 
+import asyncio
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -22,6 +23,9 @@ class LocalConnection:
     websocket: "WebSocket"
     is_host: bool = False
     closed: bool = False
+    # Set by host kick/end paths so the target's receive loop unwinds promptly
+    # even when the ASGI server won't deliver a disconnect to a pending receive.
+    kick: "asyncio.Event" = field(default_factory=asyncio.Event)
 
 
 class ConnectionRegistry:

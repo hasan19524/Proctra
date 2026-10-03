@@ -7,6 +7,7 @@ messages (Phase 5), notes (Phase 7), audit_logs (Phase 13).
 
 from app.models.meeting import Meeting
 from app.models.message import Message
+from app.models.participant import MeetingParticipant
 from app.models.user import RefreshToken, User
 
-__all__ = ["Meeting", "Message", "RefreshToken", "User"]
+__all__ = ["Meeting", "MeetingParticipant", "Message", "RefreshToken", "User"]

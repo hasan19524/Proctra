@@ -8,7 +8,8 @@ Postgres first, then broadcast — REALTIME.md §1/§3).
 import asyncio
 import contextlib
 import uuid
-from typing import Any, cast
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 
@@ -29,6 +30,7 @@ from app.services.message_service import (
     list_recent_messages,
     message_dto,
 )
+from app.services.participant_service import record_join, record_leave
 from app.ws import presence
 from app.ws.envelope import (
     CLOSE_FORBIDDEN,
@@ -42,12 +44,19 @@ from app.ws.envelope import (
 from app.ws.registry import get_registry
 from app.ws.seq import current_seq, next_seq
 
+if TYPE_CHECKING:
+    from app.ws.registry import LocalConnection
+
 router = APIRouter()
 
 # The client pings every 25 s (REALTIME.md); no frame for this long = dead peer.
 IDLE_TIMEOUT_SECONDS = 60.0
 # Upper bound for one reconnect replay (the snapshot also carries a 50-msg tail).
 REPLAY_LIMIT = 500
+
+
+class _Kicked(Exception):
+    """The connection was kicked by a host action (remove/end)."""
 
 
 def _channel(meeting_code: str) -> str:
@@ -105,15 +114,20 @@ async def _snapshot(meeting_code: str, meeting: Meeting, user_id: str) -> str:
     """Build the ``sync.state`` full snapshot frame (participants + chat tail)."""
     participants = await presence.get_presence(meeting_code)
     async with SessionLocal() as session:
+        row = await session.get(Meeting, meeting.id)
         recent = await list_recent_messages(session, meeting.id)
+    current = row or meeting  # re-read so lock/permission changes are visible
     return server_frame(
         "sync.state",
         {
             "meeting": {
-                "code": meeting.code,
-                "title": meeting.title,
-                "status": meeting.status,
-                "is_locked": meeting.is_locked,
+                "code": current.code,
+                "title": current.title,
+                "status": current.status,
+                "is_locked": current.is_locked,
+                "allow_chat": current.allow_chat,
+                "allow_reactions": current.allow_reactions,
+                "allow_screen_share": current.allow_screen_share,
             },
             "self": {"user_id": user_id},
             "participants": participants,
@@ -182,6 +196,20 @@ async def _handle_chat_send(
     seq = await next_seq(meeting_code)
     try:
         async with SessionLocal() as session:
+            row = await session.get(Meeting, meeting.id)
+            if row is not None and not row.allow_chat:
+                await _send(
+                    websocket,
+                    server_frame(
+                        "error",
+                        {
+                            "code": "permission_denied",
+                            "message": "Chat is turned off by the host",
+                            "retryable": False,
+                        },
+                    ),
+                )
+                return
             message, _created = await create_message(
                 session,
                 meeting_id=meeting.id,
@@ -211,6 +239,142 @@ async def _handle_chat_send(
         meeting_code,
         server_frame("chat.message", message_dto(message, user.display_name), seq=message.seq),
     )
+
+
+async def _send_ws_error(
+    websocket: WebSocket, code: str, message: str, *, retryable: bool = False
+) -> None:
+    await _send(
+        websocket,
+        server_frame("error", {"code": code, "message": message, "retryable": retryable}),
+    )
+
+
+async def _handle_host_action(
+    websocket: WebSocket,
+    meeting_code: str,
+    meeting: Meeting,
+    user: User,
+    frame: Any,
+    conn: "LocalConnection",
+) -> None:
+    """Host-only controls: lock/end, mute/remove participants, permissions.
+
+    The caller's role is re-derived from Postgres on every action
+    (SECURITY.md — never trust the in-memory handshake copy).
+    """
+    payload = frame.payload if isinstance(frame.payload, dict) else {}
+    action = payload.get("action")
+    registry = get_registry()
+
+    async with SessionLocal() as session:
+        fresh = await session.get(Meeting, meeting.id)
+        if fresh is None:
+            await _send_ws_error(websocket, "not_found", "Meeting no longer exists")
+            return
+        if str(fresh.host_id) != str(user.id):
+            await _send_ws_error(websocket, "forbidden", "Host role required")
+            return
+
+        if action == "lock" or action == "unlock":
+            fresh.is_locked = action == "lock"
+            await session.commit()
+            meeting.is_locked = fresh.is_locked
+            await _broadcast(
+                meeting_code,
+                server_frame("meeting.locked", {"is_locked": fresh.is_locked}),
+            )
+            return
+
+        if action == "end":
+            if fresh.status != "ended":
+                fresh.status = "ended"
+                fresh.ended_at = datetime.now(UTC)
+                await session.commit()
+            meeting.status = "ended"
+            local = list(registry.in_meeting(meeting_code))
+            # Direct send first: terminal frames must not race the close.
+            for target in local:
+                await _send(target.websocket, server_frame("meeting.ended", {}))
+            for target in local:
+                target.closed = True
+                target.kick.set()
+                await _close(target.websocket, CLOSE_FORBIDDEN, "meeting_ended")
+            # Other workers learn via pub/sub (local sockets already got it).
+            await _broadcast(meeting_code, server_frame("meeting.ended", {}))
+            return
+
+        if action == "mute_participant":
+            target_id = payload.get("target_id")
+            if not isinstance(target_id, str) or not target_id:
+                await _send_ws_error(websocket, "invalid_target", "target_id is required")
+                return
+            present = {p.get("user_id") for p in await presence.get_presence(meeting_code)}
+            if target_id not in present:
+                await _send_ws_error(websocket, "invalid_target", "Participant not in the meeting")
+                return
+            await _broadcast(
+                meeting_code,
+                server_frame(
+                    "participant.muted",
+                    {"user_id": target_id, "by_user_id": str(user.id)},
+                ),
+            )
+            return
+
+        if action == "remove":
+            target_id = payload.get("target_id")
+            if not isinstance(target_id, str) or not target_id:
+                await _send_ws_error(websocket, "invalid_target", "target_id is required")
+                return
+            if target_id == str(user.id):
+                await _send_ws_error(websocket, "invalid_target", "Cannot remove yourself")
+                return
+            targets = [c for c in registry.in_meeting(meeting_code) if c.user_id == target_id]
+            if not targets:
+                await _send_ws_error(websocket, "invalid_target", "Participant not in the meeting")
+                return
+            for target in targets:
+                await _send(
+                    target.websocket,
+                    server_frame("participant.removed", {"user_id": target_id}),
+                )
+                target.closed = True
+                target.kick.set()
+                await _close(target.websocket, CLOSE_FORBIDDEN, "removed")
+            # Cross-worker copies of the target close themselves on this frame.
+            await _broadcast(
+                meeting_code,
+                server_frame("participant.removed", {"user_id": target_id}),
+            )
+            return
+
+        if action == "set_permissions":
+            changed = False
+            for field in ("allow_chat", "allow_reactions", "allow_screen_share"):
+                value = payload.get(field)
+                if isinstance(value, bool) and getattr(fresh, field) != value:
+                    setattr(fresh, field, value)
+                    changed = True
+            if changed:
+                await session.commit()
+                meeting.allow_chat = fresh.allow_chat
+                meeting.allow_reactions = fresh.allow_reactions
+                meeting.allow_screen_share = fresh.allow_screen_share
+            await _broadcast(
+                meeting_code,
+                server_frame(
+                    "permission.changed",
+                    {
+                        "allow_chat": fresh.allow_chat,
+                        "allow_reactions": fresh.allow_reactions,
+                        "allow_screen_share": fresh.allow_screen_share,
+                    },
+                ),
+            )
+            return
+
+        await _send_ws_error(websocket, "unknown_action", f"Unsupported host action: {action}")
 
 
 @router.websocket("/meetings/{meeting_code}")
@@ -269,6 +433,13 @@ async def ws_meeting(
         name=user.display_name,
         is_host=is_host,
     )
+    async with SessionLocal() as session:
+        await record_join(
+            session,
+            meeting_id=meeting.id,
+            user_id=user.id,
+            role="host" if is_host else "participant",
+        )
 
     # 4. Handshake snapshot, then announce the join to everyone.
     await _send(websocket, await _snapshot(code, meeting, str(user.id)))
@@ -285,7 +456,7 @@ async def ws_meeting(
     )
 
     try:
-        await _serve(websocket, code, meeting, user)
+        await _serve(websocket, code, meeting, user, conn)
     finally:
         conn.closed = True
         listener.cancel()
@@ -297,6 +468,9 @@ async def ws_meeting(
         registry.remove(conn)
         became_gone = await presence.release_user(code, str(user.id))
         if became_gone:
+            with contextlib.suppress(Exception):
+                async with SessionLocal() as session:
+                    await record_leave(session, meeting_id=meeting.id, user_id=user.id)
             await _broadcast(
                 code,
                 server_frame("participant.left", {"user_id": str(user.id)}),
@@ -307,18 +481,53 @@ async def ws_meeting(
         )
 
 
+async def _receive_frame(websocket: WebSocket, conn: "LocalConnection") -> str:
+    """Next client text frame, the idle timeout, or a kick.
+
+    A pending ``receive()`` is not woken when *we* close the socket (the ASGI
+    server only injects a disconnect on the client's handshake), so host kicks
+    race it explicitly — otherwise presence/attendance cleanup stalls.
+    """
+    recv_task = asyncio.create_task(websocket.receive_text())
+    kick_task = asyncio.create_task(conn.kick.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {recv_task, kick_task},
+            timeout=IDLE_TIMEOUT_SECONDS,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not done:
+            raise TimeoutError("idle timeout")
+        if recv_task in done:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                kick_task.cancel()
+                await kick_task
+            return recv_task.result()  # may raise WebSocketDisconnect/RuntimeError
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            recv_task.cancel()
+            await recv_task
+        raise _Kicked()
+    finally:
+        for task in (recv_task, kick_task):
+            if not task.done():
+                task.cancel()
+
+
 async def _serve(
     websocket: WebSocket,
     meeting_code: str,
     meeting: Meeting,
     user: User,
+    conn: "LocalConnection",
 ) -> None:
     """Receive loop: parse envelopes, dispatch, keep the connection honest."""
     while True:
         try:
-            raw = await asyncio.wait_for(websocket.receive_text(), timeout=IDLE_TIMEOUT_SECONDS)
+            raw = await _receive_frame(websocket, conn)
         except TimeoutError:
             await _close(websocket, CLOSE_IDLE_TIMEOUT, "idle_timeout")
+            return
+        except _Kicked:
             return
         except (WebSocketDisconnect, RuntimeError):
             return
@@ -356,6 +565,8 @@ async def _serve(
                 )
         elif frame.type == "chat.send":
             await _handle_chat_send(websocket, meeting_code, meeting, user, frame)
+        elif frame.type == "host.action":
+            await _handle_host_action(websocket, meeting_code, meeting, user, frame, conn)
         else:
             await _send(
                 websocket,

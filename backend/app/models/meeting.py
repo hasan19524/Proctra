@@ -29,6 +29,9 @@ class Meeting(Base):
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="waiting")
     is_locked: Mapped[bool] = mapped_column(nullable=False, default=False)
+    allow_chat: Mapped[bool] = mapped_column(nullable=False, default=True)
+    allow_reactions: Mapped[bool] = mapped_column(nullable=False, default=True)
+    allow_screen_share: Mapped[bool] = mapped_column(nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

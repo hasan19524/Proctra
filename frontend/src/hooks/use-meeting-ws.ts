@@ -33,11 +33,24 @@ export interface MeetingMeta {
   allow_screen_share: boolean;
 }
 
+export type NoteVisibility = "all" | "host_only";
+
+export interface WsNote {
+  id: string;
+  meeting_id: string;
+  visibility: NoteVisibility;
+  content: { text?: string };
+  updated_by: string | null;
+  updated_by_name: string | null;
+  updated_at: string;
+}
+
 interface SyncStatePayload {
   self?: { user_id: string };
   participants?: WsParticipant[];
   messages?: WsChatMessage[];
   meeting?: MeetingMeta;
+  notes?: WsNote[];
 }
 
 interface PresenceStatePayload {
@@ -95,6 +108,7 @@ export function useMeetingWs(code: string | null) {
   const [selfUserId, setSelfUserId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<WsChatMessage[]>([]);
   const [meeting, setMeeting] = React.useState<MeetingMeta | null>(null);
+  const [notes, setNotes] = React.useState<WsNote[]>([]);
   const [isRemoved, setIsRemoved] = React.useState(false);
   const [selfMuteNonce, setSelfMuteNonce] = React.useState(0);
   const socketRef = React.useRef<MeetingSocket | null>(null);
@@ -118,6 +132,7 @@ export function useMeetingWs(code: string | null) {
         if (payload?.self?.user_id) setSelfUserId(payload.self.user_id);
         if (Array.isArray(payload?.participants)) setParticipants(payload.participants);
         if (payload?.meeting) setMeeting(payload.meeting);
+        if (Array.isArray(payload?.notes)) setNotes(payload.notes);
         if (Array.isArray(payload?.messages) && payload.messages.length > 0) {
           setMessages((current) => upsertMessages(current, payload.messages ?? []));
         }
@@ -163,6 +178,13 @@ export function useMeetingWs(code: string | null) {
           setSelfMuteNonce((nonce) => nonce + 1);
         }
       }),
+      socket.on<WsNote>("note.updated", (payload) => {
+        if (!payload || typeof payload.id !== "string") return;
+        setNotes((current) => {
+          const rest = current.filter((note) => note.id !== payload.id);
+          return [...rest, payload].sort((a, b) => a.visibility.localeCompare(b.visibility));
+        });
+      }),
     ];
 
     socket.connect();
@@ -186,6 +208,14 @@ export function useMeetingWs(code: string | null) {
     [],
   );
 
+  /** Replace one notes document; returns the frame id or null when offline. */
+  const sendNoteSave = React.useCallback(
+    (visibility: NoteVisibility, content: { text?: string }): string | null => {
+      return socketRef.current?.send("note.save", { visibility, content }) ?? null;
+    },
+    [],
+  );
+
   /**
    * Send a chat message. Returns the idempotency key when queued/sent, or
    * `null` when the socket is closed or the text is blank.
@@ -203,10 +233,12 @@ export function useMeetingWs(code: string | null) {
     selfUserId,
     messages,
     meeting,
+    notes,
     isRemoved,
     selfMuteNonce,
     updateFlags,
     sendChat,
     sendHostAction,
+    sendNoteSave,
   };
 }

@@ -15,6 +15,7 @@ import {
   ScreenShareIcon,
   SettingsIcon,
   SmileIcon,
+  StickyNoteIcon,
   VideoIcon,
   VideoOffIcon,
 } from "lucide-react";
@@ -40,7 +41,7 @@ type MeetingControlsState = {
   isHandRaised: boolean;
 };
 
-type MoreAction = "captions" | "settings" | "host-controls";
+type MoreAction = "captions" | "settings" | "notes" | "host-controls";
 
 type MeetingControlsProps = {
   state: MeetingControlsState;
@@ -233,6 +234,10 @@ function MeetingControls({
           <DropdownMenuItem onClick={() => onMoreAction?.("settings")}>
             <SettingsIcon data-icon="inline-start" />
             Settings
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onMoreAction?.("notes")}>
+            <StickyNoteIcon data-icon="inline-start" />
+            Notes
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => onMoreAction?.("host-controls")}>

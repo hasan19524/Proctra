@@ -32,11 +32,13 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
     selfUserId,
     messages,
     meeting,
+    notes,
     isRemoved,
     selfMuteNonce,
     updateFlags,
     sendChat,
     sendHostAction,
+    sendNoteSave,
   } = useMeetingWs(code);
 
   // Host muted me: turn the mic off locally (render-phase adjustment, the
@@ -74,7 +76,9 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       connection={status}
       messages={messages}
       meeting={meeting}
+      notes={notes}
       onSendChat={sendChat}
+      onSendNote={(visibility, text) => sendNoteSave(visibility, { text })}
       onHostAction={sendHostAction}
       micOn={isMicOn}
       cameraOn={isCameraOn}

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { MeetingTopBar } from "@/components/meeting/meeting-top-bar";
-import { ChatPanel, PeoplePanel } from "@/components/meeting/meeting-panels";
+import { ChatPanel, NotesPanel, PeoplePanel } from "@/components/meeting/meeting-panels";
 import { ReactionBar } from "@/components/meeting/reaction-bar";
 import { UtilityCluster } from "@/components/meeting/meeting-controls";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -170,6 +170,84 @@ describe("ChatPanel", () => {
     render(<ChatPanel allowChat={true} />);
     expect(screen.queryByRole("switch")).toBeNull();
     expect(screen.queryByText("Chat is turned off")).toBeNull();
+  });
+});
+
+describe("NotesPanel", () => {
+  function sharedNote(text: string) {
+    return {
+      id: "n1",
+      meeting_id: "m1",
+      visibility: "all" as const,
+      content: { text },
+      updated_by: "u1",
+      updated_by_name: "Host Person",
+      updated_at: "2026-10-04T10:00:00+00:00",
+    };
+  }
+
+  it("shows the empty state and a disabled save button", () => {
+    render(<NotesPanel onSave={vi.fn()} />);
+
+    expect(screen.getByText("No notes yet")).toBeTruthy();
+    expect(screen.getByPlaceholderText(/Start writing/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("hydrates from a persisted note and saves edits through the handler", () => {
+    const onSave = vi.fn(() => true);
+    const view = render(<NotesPanel notes={[sharedNote("standup agenda")]} onSave={onSave} />);
+
+    const textarea = screen.getByLabelText("Shared notes") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("standup agenda");
+    expect(screen.getByText("Saved by Host Person")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(textarea, { target: { value: "standup agenda + decisions" } });
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave).toHaveBeenCalledWith("all", "standup agenda + decisions");
+
+    // The server echo arrives with the saved text — dirty clears again.
+    view.rerender(
+      <NotesPanel notes={[sharedNote("standup agenda + decisions")]} onSave={onSave} />,
+    );
+    expect(screen.getByText("Saved by Host Person")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("keeps edits dirty when the save does not send", () => {
+    const onSave = vi.fn(() => false);
+    render(<NotesPanel notes={[sharedNote("v1")]} onSave={onSave} />);
+
+    const textarea = screen.getByLabelText("Shared notes");
+    fireEvent.change(textarea, { target: { value: "v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith("all", "v2");
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+  });
+
+  it("offers the host-only document only to the host", () => {
+    const { rerender } = render(<NotesPanel isHost={true} />);
+    expect(screen.getByRole("tab", { name: "Shared" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Host-only" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Host-only" }));
+    expect(screen.getByLabelText("Host-only notes")).toBeTruthy();
+
+    rerender(<NotesPanel isHost={false} />);
+    expect(screen.queryByRole("tab", { name: "Host-only" })).toBeNull();
+    expect(screen.getByLabelText("Shared notes")).toBeTruthy();
+  });
+
+  it("disables editing while disconnected", () => {
+    render(<NotesPanel connectionOpen={false} />);
+
+    expect((screen.getByLabelText("Shared notes") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.getByText("Reconnecting")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
   });
 });
 

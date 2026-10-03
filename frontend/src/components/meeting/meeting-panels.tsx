@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import type { NoteVisibility, WsNote } from "@/hooks/use-meeting-ws";
 import {
   Empty,
   EmptyDescription,
@@ -333,5 +335,119 @@ function ChatPanel({
   );
 }
 
-export { PeoplePanel, ChatPanel };
+function NotesPanel({
+  notes = [],
+  isHost = false,
+  connectionOpen = true,
+  onSave,
+  onClose,
+  className,
+}: {
+  notes?: WsNote[];
+  isHost?: boolean;
+  connectionOpen?: boolean;
+  onSave?: (visibility: NoteVisibility, text: string) => boolean;
+  onClose?: () => void;
+  className?: string;
+}) {
+  const [visibility, setVisibility] = React.useState<NoteVisibility>("all");
+  const [drafts, setDrafts] = React.useState<Record<NoteVisibility, string>>({
+    all: "",
+    host_only: "",
+  });
+  const [dirty, setDirty] = React.useState<Record<NoteVisibility, boolean>>({
+    all: false,
+    host_only: false,
+  });
+
+  // Derive drafts from the wire: adopt server-confirmed content while the
+  // local draft is clean, and clear `dirty` once an echo matches the draft.
+  if (connectionOpen) {
+    for (const note of notes) {
+      const text = note.content.text ?? "";
+      if (dirty[note.visibility] && drafts[note.visibility] === text) {
+        setDirty((current) => ({ ...current, [note.visibility]: false }));
+      } else if (!dirty[note.visibility] && drafts[note.visibility] !== text) {
+        setDrafts((current) => ({ ...current, [note.visibility]: text }));
+      }
+    }
+  }
+  if (!isHost && visibility !== "all") {
+    setVisibility("all");
+  }
+
+  const active = notes.find((note) => note.visibility === visibility) ?? null;
+  const text = drafts[visibility];
+  const isDirty = dirty[visibility];
+
+  const tabs: { value: NoteVisibility; label: string }[] = [
+    { value: "all", label: "Shared" },
+    ...(isHost ? [{ value: "host_only" as NoteVisibility, label: "Host-only" }] : []),
+  ];
+
+  return (
+    <aside aria-label="Notes" className={cn(PANEL_BASE, "min-h-0", className)}>
+      <PanelHeader title="Notes" onClose={onClose} />
+
+      <div role="tablist" aria-label="Notes documents" className="flex gap-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={visibility === tab.value}
+            onClick={() => setVisibility(tab.value)}
+            className={cn(
+              "hover:bg-muted rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+              visibility === tab.value && "bg-muted",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <Textarea
+        aria-label={visibility === "all" ? "Shared notes" : "Host-only notes"}
+        placeholder={
+          connectionOpen ? "Start writing — everyone in the meet sees this." : "Connecting…"
+        }
+        value={text}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDrafts((current) => ({ ...current, [visibility]: next }));
+          setDirty((current) => ({ ...current, [visibility]: true }));
+        }}
+        disabled={!connectionOpen}
+        className="min-h-40 flex-1 resize-none"
+      />
+
+      {!connectionOpen ? (
+        <Alert variant="warning">
+          <AlertTitle>Reconnecting</AlertTitle>
+          <AlertDescription>Notes will save again once the meet reconnects.</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-muted-foreground truncate text-xs">
+          {isDirty
+            ? "Unsaved changes"
+            : active?.updated_by_name
+              ? `Saved by ${active.updated_by_name}`
+              : "No notes yet"}
+        </p>
+        <Button
+          size="sm"
+          disabled={!isDirty || !connectionOpen}
+          onClick={() => onSave?.(visibility, text)}
+        >
+          Save
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
+export { ChatPanel, NotesPanel, PeoplePanel };
 export type { PanelParticipant, ChatMessage };

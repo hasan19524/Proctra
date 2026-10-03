@@ -4,11 +4,18 @@ import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
 import { useClock } from "@/hooks/use-clock";
-import type { MeetingMeta, WsChatMessage, WsParticipant } from "@/hooks/use-meeting-ws";
+import type {
+  MeetingMeta,
+  NoteVisibility,
+  WsChatMessage,
+  WsNote,
+  WsParticipant,
+} from "@/hooks/use-meeting-ws";
 import type { WsStatus } from "@/lib/ws";
 import { MeetingControls, UtilityCluster } from "@/components/meeting/meeting-controls";
 import {
   ChatPanel,
+  NotesPanel,
   PeoplePanel,
   type ChatMessage,
   type PanelParticipant,
@@ -26,7 +33,9 @@ interface InCallViewProps {
   connection: WsStatus;
   messages: WsChatMessage[];
   meeting: MeetingMeta | null;
+  notes: WsNote[];
   onSendChat: (body: string) => string | null;
+  onSendNote: (visibility: NoteVisibility, text: string) => string | null;
   onHostAction: (action: string, payload?: Record<string, unknown>) => void;
   micOn: boolean;
   cameraOn: boolean;
@@ -63,7 +72,9 @@ export function InCallView({
   connection,
   messages,
   meeting,
+  notes,
   onSendChat,
+  onSendNote,
   onHostAction,
   micOn,
   cameraOn,
@@ -79,7 +90,7 @@ export function InCallView({
     isHandRaised: false,
   });
   const [isReactionsOpen, setReactionsOpen] = React.useState(false);
-  const [panel, setPanel] = React.useState<"people" | "chat" | null>(null);
+  const [panel, setPanel] = React.useState<"people" | "chat" | "notes" | null>(null);
 
   const isLocked = meeting?.is_locked ?? false;
   const allowChat = meeting?.allow_chat ?? true;
@@ -111,7 +122,7 @@ export function InCallView({
     toast.add({ type: "info", title: message });
   }, []);
 
-  const togglePanel = React.useCallback((next: "people" | "chat") => {
+  const togglePanel = React.useCallback((next: "people" | "chat" | "notes") => {
     setPanel((current) => (current === next ? null : next));
   }, []);
 
@@ -197,7 +208,13 @@ export function InCallView({
               onToggleHand={() => setState((s) => ({ ...s, isHandRaised: !s.isHandRaised }))}
               onOpenChat={() => togglePanel("chat")}
               onToggleReactions={() => setReactionsOpen((open) => !open)}
-              onMoreAction={(action) => demo(`${action} (demo)`)}
+              onMoreAction={(action) => {
+                if (action === "notes") {
+                  togglePanel("notes");
+                  return;
+                }
+                demo(`${action} (demo)`);
+              }}
               onLeave={onLeave}
             />
           </footer>
@@ -212,6 +229,30 @@ export function InCallView({
               onRemove={(id) => onHostAction("remove", { target_id: id })}
               onAddPeople={() => demo("Invite people (demo)")}
               onClose={() => setPanel(null)}
+              className="h-full"
+            />
+          </div>
+        ) : null}
+
+        {panel === "notes" ? (
+          <div className="w-96 max-w-full shrink-0">
+            <NotesPanel
+              notes={notes}
+              isHost={isSelfHost}
+              connectionOpen={connection === "open"}
+              onClose={() => setPanel(null)}
+              onSave={(visibility, text) => {
+                const sent = onSendNote(visibility, text);
+                if (!sent) {
+                  toast.add({
+                    type: "error",
+                    title: "Note not saved",
+                    description: "You are not connected — it will fail until the call reconnects.",
+                  });
+                  return false;
+                }
+                return true;
+              }}
               className="h-full"
             />
           </div>

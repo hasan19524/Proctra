@@ -287,3 +287,86 @@ describe("useMeetingWs host controls", () => {
     expect(result.current.isRemoved).toBe(true);
   });
 });
+
+describe("useMeetingWs notes", () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", MockWebSocket);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function note(id: string, visibility: string, text: string) {
+    return {
+      id,
+      meeting_id: "m1",
+      visibility,
+      content: { text },
+      updated_by: "u1",
+      updated_by_name: "Host Person",
+      updated_at: "2026-10-03T12:00:00+00:00",
+    };
+  }
+
+  it("seeds notes from sync.state and upserts note.updated by id", async () => {
+    const { result } = renderHook(() => useMeetingWs("abc-def-ghi"));
+    await act(async () => {
+      MockWebSocket.last().serverOpen();
+      MockWebSocket.last().serverMessage({
+        v: 1,
+        type: "sync.state",
+        id: "s1",
+        ts: "2026-10-03T12:00:00.000Z",
+        payload: { self: { user_id: "u1" }, notes: [note("n1", "all", "agenda v1")] },
+      });
+    });
+    expect(result.current.notes).toHaveLength(1);
+
+    await act(async () => {
+      MockWebSocket.last().serverMessage({
+        v: 1,
+        type: "note.updated",
+        id: "s2",
+        ts: "2026-10-03T12:00:01.000Z",
+        payload: note("n1", "all", "agenda v2"),
+      });
+    });
+    expect(result.current.notes).toHaveLength(1);
+    expect(result.current.notes[0].content.text).toBe("agenda v2");
+
+    await act(async () => {
+      MockWebSocket.last().serverMessage({
+        v: 1,
+        type: "note.updated",
+        id: "s3",
+        ts: "2026-10-03T12:00:02.000Z",
+        payload: note("n2", "host_only", "private"),
+      });
+    });
+    expect(result.current.notes.map((n) => n.visibility)).toEqual(["all", "host_only"]);
+  });
+
+  it("sendNoteSave frames note.save with visibility and text content", async () => {
+    const { result } = renderHook(() => useMeetingWs("abc-def-ghi"));
+    await act(async () => {
+      MockWebSocket.last().serverOpen();
+    });
+
+    let frameId: string | null = null;
+    act(() => {
+      frameId = result.current.sendNoteSave("all", { text: "hello notes" });
+    });
+    expect(frameId).toBeTruthy();
+
+    const frames = MockWebSocket.last().sent.map(
+      (raw) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> },
+    );
+    const save = frames.find((frame) => frame.type === "note.save");
+    expect(save).toBeDefined();
+    expect(save?.payload.visibility).toBe("all");
+    expect(save?.payload.content).toEqual({ text: "hello notes" });
+  });
+});

@@ -1,0 +1,42 @@
+"""Meeting model (Phase 3)."""
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+class Meeting(Base):
+    """A Procto meeting room, addressable by its short join code."""
+
+    __tablename__ = "meetings"
+    __table_args__ = (
+        CheckConstraint("status IN ('waiting', 'live', 'ended')", name="ck_meetings_status"),
+        Index("ix_meetings_host_id", "host_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(11), unique=True, nullable=False, index=True)
+    title: Mapped[str | None] = mapped_column(String(120))
+    host_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="waiting")
+    is_locked: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

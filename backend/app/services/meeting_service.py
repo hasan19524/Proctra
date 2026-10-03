@@ -1,0 +1,63 @@
+"""Meeting lifecycle helpers (Phase 3)."""
+
+import re
+import secrets
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.meeting import Meeting
+
+# Unambiguous alphabet (no 0/o/1/l) and Meet-style three groups of three.
+CODE_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"
+CODE_GROUP = 3
+CODE_GROUPS = 3
+CODE_RE = re.compile(r"^[a-z2-9]{3}-[a-z2-9]{3}-[a-z2-9]{3}$")
+CODE_ATTEMPTS = 5
+
+
+class MeetingNotFoundError(Exception):
+    """Raised when no meeting exists for the given code."""
+
+
+def generate_code() -> str:
+    """Generate a human-friendly join code like ``ktq-vxm-pnz``."""
+    raw = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_GROUP * CODE_GROUPS))
+    groups = [raw[i : i + CODE_GROUP] for i in range(0, len(raw), CODE_GROUP)]
+    return "-".join(groups)
+
+
+def normalize_code(code: str) -> str:
+    """Trim and lowercase a code pasted by a user."""
+    return code.strip().lower()
+
+
+async def create_meeting(
+    session: AsyncSession,
+    host_id: UUID,
+    title: str | None = None,
+) -> Meeting:
+    """Create a meeting owned by ``host_id``, retrying on code collisions."""
+    for attempt in range(CODE_ATTEMPTS):
+        meeting = Meeting(code=generate_code(), title=title, host_id=host_id)
+        session.add(meeting)
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            if attempt == CODE_ATTEMPTS - 1:
+                raise
+            continue
+        return meeting
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
+async def get_meeting_by_code(session: AsyncSession, code: str) -> Meeting:
+    """Look a meeting up by (normalized) code or raise ``MeetingNotFoundError``."""
+    normalized = normalize_code(code)
+    meeting = await session.scalar(select(Meeting).where(Meeting.code == normalized))
+    if meeting is None:
+        raise MeetingNotFoundError(normalized)
+    return meeting

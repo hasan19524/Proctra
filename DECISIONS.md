@@ -338,3 +338,29 @@ need CRDTs the spec never asks for.
 **Consequences.** Notes are durable, reconnect-safe, and private by default;
 upgrading to a real collaborative editor later means changing the content
 shape and save cadence, not the transport or the visibility model.
+
+---
+
+## D18 - Reactions are transient; hand raise is presence state
+
+**Status:** Accepted (2026-10-04, Phase 8)
+
+**Context.** Two features look similar in the UI but have opposite
+persistence needs: burst reactions (spammy, must never hit Postgres) and the
+raised hand (must survive reconnects and show up in snapshots).
+
+**Decision.**
+- Reactions travel as `reaction.send {label}` and fan out as
+  `reaction.received {user_id, name, label}` with no `seq` and no row —
+  invalidation is a server-side whitelist (the nine ReactionBar labels) plus
+  the meeting's `allow_reactions` gate (`permission_denied` when off).
+  Clients keep a capped, TTL-pruned list; the CSS float animation
+  (`reaction-float`, `animation-fill-mode: forwards`) hides items after ~4s,
+  so rendering stays pure (no `Date.now()` in render — `react-hooks/purity`).
+- Hand raise is just a `presence.update {hand_raised}` flag: the UI derives
+  it from the roster (never local state), so every participant, the
+  `sync.state` snapshot, and a rejoining user all agree.
+
+**Consequences.** Reactions cannot leak load into the database or the replay
+path; the hand persists exactly as long as presence does, and Phase 13 can
+rate-limit `reaction.send` without touching a storage model.

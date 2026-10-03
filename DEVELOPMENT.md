@@ -109,7 +109,7 @@ boundary.
 | 5 — Chat | ✅ done |
 | 6 — Participant management + host controls | ✅ done |
 | 7 — Notes | ✅ done |
-| 8 — Reactions + hand raise (real) | ⬜ |
+| 8 — Reactions + hand raise (real) | ✅ done |
 | 9 — LiveKit real audio/video | ⬜ |
 | 10 — Screen sharing | ⬜ |
 | 11 — Complete meeting experience | ⬜ |

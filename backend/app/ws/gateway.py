@@ -1,9 +1,9 @@
-"""Application WebSocket gateway (Phases 4-7).
+"""Application WebSocket gateway (Phases 4-8).
 
 Connect handshake (auth + meeting authorization), versioned envelope loop,
 heartbeat/idle handling, Redis pub/sub fan-out, durable chat (persist to
-Postgres first, then broadcast — REALTIME.md §1/§3), host controls, and
-shared notes (whole-document saves broadcast as ``note.updated``).
+Postgres first, then broadcast — REALTIME.md §1/§3), host controls, shared
+notes, and transient reactions (whitelisted labels, never persisted).
 """
 
 import asyncio
@@ -57,6 +57,10 @@ router = APIRouter()
 IDLE_TIMEOUT_SECONDS = 60.0
 # Upper bound for one reconnect replay (the snapshot also carries a 50-msg tail).
 REPLAY_LIMIT = 500
+# Transient reactions are a closed set (matches the frontend ReactionBar).
+REACTION_LABELS = frozenset(
+    {"Heart", "Thumbs up", "Party", "Clap", "Laugh", "Wow", "Sad", "Angry", "Thumbs down"}
+)
 
 
 class _Kicked(Exception):
@@ -265,6 +269,35 @@ async def _handle_chat_send(
     await _broadcast(
         meeting_code,
         server_frame("chat.message", message_dto(message, user.display_name), seq=message.seq),
+    )
+
+
+async def _handle_reaction_send(
+    websocket: WebSocket,
+    meeting_code: str,
+    meeting: Meeting,
+    user: User,
+    frame: Any,
+) -> None:
+    """Broadcast one transient reaction; never persisted, no ``seq``."""
+    payload = frame.payload if isinstance(frame.payload, dict) else {}
+    label = payload.get("label")
+    if not isinstance(label, str) or label not in REACTION_LABELS:
+        await _send_ws_error(websocket, "invalid_reaction", "Unknown reaction label")
+        return
+    async with SessionLocal() as session:
+        row = await session.get(Meeting, meeting.id)
+        if row is not None and not row.allow_reactions:
+            await _send_ws_error(
+                websocket, "permission_denied", "Reactions are turned off by the host"
+            )
+            return
+    await _broadcast(
+        meeting_code,
+        server_frame(
+            "reaction.received",
+            {"user_id": str(user.id), "name": user.display_name, "label": label},
+        ),
     )
 
 
@@ -643,6 +676,8 @@ async def _serve(
             await _handle_chat_send(websocket, meeting_code, meeting, user, frame)
         elif frame.type == "note.save":
             await _handle_note_save(websocket, meeting_code, meeting, user, frame)
+        elif frame.type == "reaction.send":
+            await _handle_reaction_send(websocket, meeting_code, meeting, user, frame)
         elif frame.type == "host.action":
             await _handle_host_action(websocket, meeting_code, meeting, user, frame, conn)
         else:

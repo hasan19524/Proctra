@@ -251,3 +251,27 @@ its SUBSCRIBE completes, and the shared Redis client carries a 2 s
 **Consequences.** Fan-out is race-free and idle listeners survive; the
 frontend `src/lib/ws` client owns the 25 s heartbeat, `seq` tracking, and
 reconnect policy per REALTIME.md.
+
+## D15 - Chat delivery: persist-first, client_id idempotency, bounded replay
+
+**Status:** Accepted (2026-10-04, Phase 5)
+
+**Context.** REALTIME.md requires at-least-once chat: the server persists
+before broadcasting, and reconnects replay durable events from Postgres by
+`seq`. Naive replay can flood a fresh client or duplicate frames the client
+already has.
+
+**Decision.**
+- `chat.send` validates (1-4000 chars), allocates the Redis-backed
+  per-meeting `seq`, inserts into `meeting_messages`, and only then
+  broadcasts `chat.message`; failures return a retryable `internal_error`.
+- The client supplies `client_id` (UUID) as an idempotency key; a partial
+  unique index on `(meeting_id, client_id)` makes retries return the
+  existing row while still re-broadcasting (at-least-once).
+- `sync.state` carries a 50-message tail (fresh joins need no replay);
+  `sync {last_seq}` replays `seq > last_seq` only when `last_seq > 0`,
+  capped at 500 messages. The frontend merges frames by id, ordered by seq.
+
+**Consequences.** Chat survives transient network loss and duplicated
+delivery without unbounded history dumps; deletion (`chat.deleted`) arrives
+with host controls in Phase 6.

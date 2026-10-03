@@ -106,7 +106,7 @@ boundary.
 | 2 — Authentication + user system | ✅ done |
 | 3 — Meeting creation, join, pre-join lobby | ✅ done |
 | 4 — Real-time WS core (FastAPI + Redis + PG) | ✅ done |
-| 5 — Chat | ⬜ |
+| 5 — Chat | ✅ done |
 | 6 — Participant management + host controls | ⬜ |
 | 7 — Notes | ⬜ |
 | 8 — Reactions + hand raise (real) | ⬜ |

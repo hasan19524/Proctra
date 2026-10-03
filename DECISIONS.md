@@ -306,3 +306,35 @@ disconnects also have to be observable by tests and by the removed client.
 covered by an in-suite WS test client plus the real-socket smoke; the frontend
 derives its gates from `sync.state.meeting` plus those broadcasts instead of
 optimistic local state.
+
+---
+
+## D17 - Notes: whole-document WS saves, two visibility documents, relay-level filtering
+
+**Status:** Accepted (2026-10-04, Phase 7)
+
+**Context.** Notes are a persistent JSONB document per meeting (DATABASE.md),
+not a message log. The spec calls the content a "rich text document" but no
+editor is in the dependency set, and concurrent keystroke streaming would
+need CRDTs the spec never asks for.
+
+**Decision.**
+- `meeting_notes` holds up to two whole documents per meeting (`all` and
+  `host_only`, UNIQUE per pair). Saves go over the existing socket as
+  `note.save {visibility, content}` and broadcast `note.updated`; `sync.state`
+  re-seeds late joiners — same transport and membership checks as chat.
+- Content shape is `{"text": "<string>"}` inside JSONB — schema-compatible
+  with a future rich-text structure without one now; saves are explicit
+  (Save button), last-write-wins, capped at 100k characters (`invalid_note`).
+- `host_only` is enforced in three places: save authorization (host role
+  re-derived like `host.action`), snapshot filtering (non-hosts never receive
+  one), and relay-level frame filtering (`_is_host_only_note` in the gateway's
+  per-connection relay and broadcast fallback) so pub/sub fan-out cannot leak
+  a private document.
+- The panel derives editor state in render: drafts adopt server-confirmed
+  content only while clean, and `dirty` clears solely on an echo matching the
+  draft — a rejected save therefore stays visibly unsaved.
+
+**Consequences.** Notes are durable, reconnect-safe, and private by default;
+upgrading to a real collaborative editor later means changing the content
+shape and save cadence, not the transport or the visibility model.

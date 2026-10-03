@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
 import { useClock } from "@/hooks/use-clock";
-import type { WsParticipant } from "@/hooks/use-meeting-ws";
+import type { WsChatMessage, WsParticipant } from "@/hooks/use-meeting-ws";
 import type { WsStatus } from "@/lib/ws";
 import { MeetingControls, UtilityCluster } from "@/components/meeting/meeting-controls";
 import {
@@ -24,11 +24,26 @@ interface InCallViewProps {
   participants: WsParticipant[];
   selfUserId: string | null;
   connection: WsStatus;
+  messages: WsChatMessage[];
+  onSendChat: (body: string) => string | null;
   micOn: boolean;
   cameraOn: boolean;
   onToggleMic: () => void;
   onToggleCamera: () => void;
   onLeave: () => void;
+}
+
+function toPanelMessage(message: WsChatMessage): ChatMessage {
+  const time = new Date(message.created_at).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return {
+    id: message.id,
+    author: message.sender_name,
+    text: message.body,
+    time,
+  };
 }
 
 function toTopBarStatus(status: WsStatus): MeetingStatus | undefined {
@@ -44,6 +59,8 @@ export function InCallView({
   participants,
   selfUserId,
   connection,
+  messages,
+  onSendChat,
   micOn,
   cameraOn,
   onToggleMic,
@@ -60,7 +77,6 @@ export function InCallView({
   const [isReactionsOpen, setReactionsOpen] = React.useState(false);
   const [panel, setPanel] = React.useState<"people" | "chat" | null>(null);
   const [isLocked, setLocked] = React.useState(false);
-  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
 
   const self = React.useMemo(
     () => participants.find((participant) => participant.user_id === selfUserId) ?? null,
@@ -182,19 +198,17 @@ export function InCallView({
         {panel === "chat" ? (
           <div className="w-96 max-w-full shrink-0">
             <ChatPanel
-              messages={messages}
+              messages={messages.map(toPanelMessage)}
               onClose={() => setPanel(null)}
-              onSend={(text) =>
-                setMessages((current) => [
-                  ...current,
-                  {
-                    id: `${current.length + 1}`,
-                    author: displayName,
-                    text,
-                    time,
-                  },
-                ])
-              }
+              onSend={(text) => {
+                if (!onSendChat(text)) {
+                  toast.add({
+                    type: "error",
+                    title: "Message not sent",
+                    description: "You are not connected — it will fail until the call reconnects.",
+                  });
+                }
+              }}
               className="h-full"
             />
           </div>

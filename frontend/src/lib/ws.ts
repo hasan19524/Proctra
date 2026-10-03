@@ -37,7 +37,8 @@ export function meetingWsUrl(code: string, accessToken: string): string {
   return `${base}/api/v1/ws/meetings/${encodeURIComponent(code)}?token=${encodeURIComponent(accessToken)}`;
 }
 
-function newId(): string {
+/** Random id used for frame ids and client-side idempotency keys. */
+export function newId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }

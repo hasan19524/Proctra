@@ -23,7 +23,7 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
   const [isMicOn, setIsMicOn] = React.useState(micOn);
   const [isCameraOn, setIsCameraOn] = React.useState(cameraOn);
 
-  const { status, participants, selfUserId, updateFlags } = useMeetingWs(code);
+  const { status, participants, selfUserId, messages, updateFlags, sendChat } = useMeetingWs(code);
 
   React.useEffect(() => {
     if (status !== "open") return;
@@ -37,6 +37,8 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       participants={participants}
       selfUserId={selfUserId}
       connection={status}
+      messages={messages}
+      onSendChat={sendChat}
       micOn={isMicOn}
       cameraOn={isCameraOn}
       onToggleMic={() => setIsMicOn((on) => !on)}

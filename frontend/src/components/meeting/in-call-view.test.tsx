@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { Track } from "livekit-client";
 
 import { FloatingReactions, InCallView } from "@/components/meeting/in-call-view";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { WsReaction } from "@/hooks/use-meeting-ws";
+import type { MediaTile } from "@/hooks/use-livekit-room";
+import type { WsParticipant, WsReaction } from "@/hooks/use-meeting-ws";
 
 afterEach(cleanup);
 
@@ -72,6 +74,56 @@ describe("InCallView", () => {
 
     expect(screen.getByLabelText("Reactions")).toBeTruthy();
     expect(screen.getByText("Amina Yusuf")).toBeTruthy();
+  });
+
+  it("toggles screen share through the controlled handler", () => {
+    const onToggleScreenShare = vi.fn();
+    renderView({ onToggleScreenShare });
+
+    fireEvent.click(screen.getByRole("button", { name: "Share screen (S)" }));
+    expect(onToggleScreenShare).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks screen sharing when the host disabled it", () => {
+    const onToggleScreenShare = vi.fn();
+    renderView({ canScreenShare: false, onToggleScreenShare });
+
+    fireEvent.click(screen.getByRole("button", { name: "Share screen (S)" }));
+    expect(onToggleScreenShare).not.toHaveBeenCalled();
+  });
+
+  it("promotes a presenter's screen to the stage and keeps cameras in the strip", () => {
+    const fakeTrack = { attach: vi.fn(), detach: vi.fn() } as unknown as Track;
+    const participants: WsParticipant[] = [
+      {
+        user_id: "u1",
+        name: "Hasan",
+        is_host: true,
+        mic_on: true,
+        camera_on: true,
+        hand_raised: false,
+        screen_share_on: false,
+      },
+      {
+        user_id: "u2",
+        name: "Amina Yusuf",
+        is_host: false,
+        mic_on: true,
+        camera_on: true,
+        hand_raised: false,
+        screen_share_on: true,
+      },
+    ];
+    const mediaTiles: MediaTile[] = [
+      { id: "u2", name: "Amina Yusuf", isLocal: false, screenTrack: fakeTrack },
+    ];
+    renderView({ participants, selfUserId: "u1", mediaTiles, isScreenSharing: false });
+
+    expect(screen.getByText("Amina Yusuf is presenting")).toBeTruthy();
+    expect(fakeTrack.attach).toHaveBeenCalled();
+    // Your own camera moves into the strip while someone else presents.
+    expect(screen.getByText("Hasan (You)")).toBeTruthy();
+    expect(screen.getByText("Sharing screen")).toBeTruthy();
   });
 });
 

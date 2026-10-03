@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useLiveKitRoom } from "@/hooks/use-livekit-room";
@@ -16,6 +16,7 @@ const { FakeRoom } = vi.hoisted(() => {
     name = "Me";
     setMicrophoneEnabled = vi.fn(async () => undefined);
     setCameraEnabled = vi.fn(async () => undefined);
+    setScreenShareEnabled = vi.fn(async () => undefined);
     getTrackPublication = vi.fn(() => undefined);
   }
 
@@ -110,5 +111,38 @@ describe("useLiveKitRoom", () => {
 
     await waitFor(() => expect(result.current.status).toBe("failed"));
     expect(result.current.error).toContain("403");
+  });
+
+  it("toggles the local screen-share publication", async () => {
+    const { result } = renderHook(() => useLiveKitRoom("ktq-vxm-pnz", true, true));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+
+    const local = FakeRoom.last().localParticipant;
+    expect(result.current.screenShareOn).toBe(false);
+
+    // No publication yet: the next toggle starts sharing.
+    await act(async () => {
+      expect(await result.current.toggleScreenShare()).toBe(true);
+    });
+    expect(local.setScreenShareEnabled).toHaveBeenCalledWith(true);
+
+    // Publication now exists and is unmuted: the next toggle stops sharing.
+    local.getTrackPublication.mockReturnValue({ isMuted: false } as never);
+    await act(async () => {
+      expect(await result.current.toggleScreenShare()).toBe(false);
+    });
+    expect(local.setScreenShareEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it("resolves null when the browser declines the screen-share request", async () => {
+    const { result } = renderHook(() => useLiveKitRoom("ktq-vxm-pnz", true, true));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+
+    const local = FakeRoom.last().localParticipant;
+    local.setScreenShareEnabled.mockRejectedValueOnce(new Error("permission denied"));
+
+    await act(async () => {
+      expect(await result.current.toggleScreenShare()).toBeNull();
+    });
   });
 });

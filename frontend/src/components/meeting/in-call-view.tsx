@@ -45,6 +45,9 @@ interface InCallViewProps {
   onHostAction: (action: string, payload?: Record<string, unknown>) => void;
   micOn: boolean;
   cameraOn: boolean;
+  isScreenSharing?: boolean;
+  canScreenShare?: boolean;
+  onToggleScreenShare?: () => void;
   isHandRaised: boolean;
   onToggleHand: () => void;
   onToggleMic: () => void;
@@ -89,6 +92,9 @@ export function InCallView({
   onHostAction,
   micOn,
   cameraOn,
+  isScreenSharing = false,
+  canScreenShare = true,
+  onToggleScreenShare,
   isHandRaised,
   onToggleHand,
   onToggleMic,
@@ -98,9 +104,6 @@ export function InCallView({
   const now = useClock();
   const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const [state, setState] = React.useState({
-    isScreenSharing: false,
-  });
   const [isReactionsOpen, setReactionsOpen] = React.useState(false);
   const [panel, setPanel] = React.useState<"people" | "chat" | "notes" | null>(null);
 
@@ -138,6 +141,15 @@ export function InCallView({
     tile?.cameraTrack ? <TrackVideo track={tile.cameraTrack} mirrored={tile.isLocal} /> : null;
 
   const localTile = mediaTiles.find((tile) => tile.isLocal);
+  const shareTile = mediaTiles.find((tile) => tile.screenTrack !== undefined);
+  const presenterName =
+    participants.find((participant) => participant.user_id === shareTile?.id)?.name ??
+    shareTile?.name ??
+    "";
+
+  // While someone presents, the main stage shows their screen and the strip
+  // keeps every camera — including yours.
+  const stripParticipants = shareTile && self ? [self, ...others] : others;
 
   const togglePanel = React.useCallback((next: "people" | "chat" | "notes") => {
     setPanel((current) => (current === next ? null : next));
@@ -162,33 +174,51 @@ export function InCallView({
       <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
         <main className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="min-h-0 flex-1">
-            <ParticipantTile
-              name={`${self?.name ?? displayName} (You)`}
-              isMuted={!micOn}
-              isCameraOff={!cameraOn}
-              isScreenSharing={state.isScreenSharing}
-              isHandRaised={isHandRaised}
-              isHost={self?.is_host ?? true}
-              connection="excellent"
-              media={videoFor(localTile)}
-              className="h-full w-full"
-            />
+            {shareTile?.screenTrack ? (
+              <div className="bg-muted relative flex h-full w-full items-center justify-center overflow-hidden rounded-xl border shadow-sm">
+                <TrackVideo track={shareTile.screenTrack} />
+                <span className="bg-background/80 text-foreground absolute top-2 left-2 rounded-md px-2 py-1 text-xs font-medium backdrop-blur-sm">
+                  {shareTile.id === selfUserId
+                    ? "You are presenting"
+                    : `${presenterName} is presenting`}
+                </span>
+              </div>
+            ) : (
+              <ParticipantTile
+                name={`${self?.name ?? displayName} (You)`}
+                isMuted={!micOn}
+                isCameraOff={!cameraOn}
+                isScreenSharing={isScreenSharing}
+                isHandRaised={isHandRaised}
+                isHost={self?.is_host ?? true}
+                connection="excellent"
+                media={videoFor(localTile)}
+                className="h-full w-full"
+              />
+            )}
           </div>
 
-          {others.length > 0 ? (
+          {stripParticipants.length > 0 ? (
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {others.map((participant) => (
+              {stripParticipants.map((participant) => (
                 <ParticipantTile
                   key={participant.user_id}
-                  name={participant.name}
+                  name={
+                    participant.user_id === selfUserId
+                      ? `${participant.name} (You)`
+                      : participant.name
+                  }
                   isMuted={!participant.mic_on}
                   isCameraOff={!participant.camera_on}
+                  isScreenSharing={
+                    participant.user_id === selfUserId
+                      ? isScreenSharing
+                      : participant.screen_share_on
+                  }
                   isHandRaised={participant.hand_raised}
                   isHost={participant.is_host}
                   connection="excellent"
-                  media={videoFor(
-                    mediaTiles.find((tile) => tile.id === participant.user_id && !tile.isLocal),
-                  )}
+                  media={videoFor(mediaTiles.find((tile) => tile.id === participant.user_id))}
                   className="w-52"
                 />
               ))}
@@ -230,15 +260,23 @@ export function InCallView({
               state={{
                 isMicOn: micOn,
                 isCameraOn: cameraOn,
-                isScreenSharing: state.isScreenSharing,
+                isScreenSharing,
                 isHandRaised,
               }}
               isReactionsOpen={isReactionsOpen}
               onToggleMic={onToggleMic}
               onToggleCamera={onToggleCamera}
-              onToggleScreenShare={() =>
-                setState((s) => ({ ...s, isScreenSharing: !s.isScreenSharing }))
-              }
+              onToggleScreenShare={() => {
+                if (!canScreenShare) {
+                  toast.add({
+                    type: "error",
+                    title: "Screen sharing is turned off",
+                    description: "The host turned off screen sharing for this meet.",
+                  });
+                  return;
+                }
+                onToggleScreenShare?.();
+              }}
               onToggleHand={onToggleHand}
               onOpenChat={() => togglePanel("chat")}
               onToggleReactions={() => setReactionsOpen((open) => !open)}

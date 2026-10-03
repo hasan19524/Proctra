@@ -14,6 +14,7 @@ export interface MediaTile {
   isLocal: boolean;
   cameraTrack?: Track;
   audioTrack?: Track;
+  screenTrack?: Track;
 }
 
 const ROOM_EVENTS = [
@@ -42,12 +43,14 @@ function readTiles(room: Room): MediaTile[] {
   return participants.map((participant) => {
     const camera = participant.getTrackPublication(Track.Source.Camera);
     const microphone = participant.getTrackPublication(Track.Source.Microphone);
+    const screen = participant.getTrackPublication(Track.Source.ScreenShare);
     return {
       id: participant.identity,
       name: participant.name || participant.identity,
       isLocal: participant === room.localParticipant,
       cameraTrack: camera && !camera.isMuted ? camera.track : undefined,
       audioTrack: microphone && !microphone.isMuted ? microphone.track : undefined,
+      screenTrack: screen && !screen.isMuted ? screen.track : undefined,
     };
   });
 }
@@ -141,5 +144,26 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
     void room.localParticipant.setCameraEnabled(cameraOn);
   }, [micOn, cameraOn]);
 
-  return { status, tiles, error };
+  // Screen share is driven by the local publication itself (the browser's
+  // picker can be cancelled, and ESC stops sharing outside our UI), so the
+  // "am I sharing" answer is derived from tiles rather than mirrored state.
+  const screenShareOn = tiles.some((tile) => tile.isLocal && tile.screenTrack !== undefined);
+
+  /** Start/stop the local screen-share publication; resolves to the new
+   * on/off state, or null when the room is not ready or the user declined. */
+  const toggleScreenShare = React.useCallback(async (): Promise<boolean | null> => {
+    const room = roomRef.current;
+    if (!room || room.state !== ConnectionState.Connected) return null;
+    const current = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    const next = !(current && !current.isMuted);
+    try {
+      await room.localParticipant.setScreenShareEnabled(next);
+      setTiles(readTiles(room));
+      return next;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  return { status, tiles, error, screenShareOn, toggleScreenShare };
 }

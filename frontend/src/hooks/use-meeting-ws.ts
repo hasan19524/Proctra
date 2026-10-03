@@ -12,6 +12,7 @@ export interface WsParticipant {
   mic_on: boolean;
   camera_on: boolean;
   hand_raised: boolean;
+  screen_share_on: boolean;
   joined_at?: string;
 }
 
@@ -95,6 +96,7 @@ export interface ParticipantFlags {
   mic_on?: boolean;
   camera_on?: boolean;
   hand_raised?: boolean;
+  screen_share_on?: boolean;
 }
 
 /**

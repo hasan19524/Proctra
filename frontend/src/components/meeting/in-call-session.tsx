@@ -51,8 +51,9 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
   const isHandRaised = self?.hand_raised ?? false;
 
   // Media (LiveKit SFU) runs beside the app WS: roster on one socket, real
-  // audio/video on the SFU. A media failure degrades to chat-only.
-  const media = useLiveKitRoom(code, micOn, cameraOn);
+  // audio/video on the SFU. A media failure degrades to chat-only. Flags are
+  // the local state (not the entry props) so toggles reach LiveKit too.
+  const media = useLiveKitRoom(code, isMicOn, isCameraOn);
   const mediaStatusRef = React.useRef(media.status);
   React.useEffect(() => {
     if (media.status === "failed" && mediaStatusRef.current !== "failed") {
@@ -71,6 +72,51 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
     setHandledMuteNonce(selfMuteNonce);
     setIsMicOn(false);
   }
+
+  const allowScreenShare = meeting?.allow_screen_share ?? true;
+  const { screenShareOn, toggleScreenShare } = media;
+
+  const handleToggleScreenShare = React.useCallback(async () => {
+    if (!allowScreenShare) {
+      toast.add({
+        type: "error",
+        title: "Screen sharing is turned off",
+        description: "The host turned off screen sharing for this meet.",
+      });
+      return;
+    }
+    const next = await toggleScreenShare();
+    if (next === null) {
+      toast.add({
+        type: "warning",
+        title: "Screen share cancelled",
+        description: "Your screen was not shared.",
+      });
+      return;
+    }
+    updateFlags({ screen_share_on: next });
+  }, [allowScreenShare, toggleScreenShare, updateFlags]);
+
+  // Host disabled screen sharing mid-share: stop the local publication so the
+  // permission means something (the server also rejects the roster flag).
+  // Fires at most once per disable — the effect re-runs on unrelated renders.
+  const forceStoppedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (allowScreenShare) {
+      forceStoppedRef.current = false;
+      return;
+    }
+    if (!screenShareOn || forceStoppedRef.current) return;
+    forceStoppedRef.current = true;
+    void toggleScreenShare().then((next) => {
+      if (next !== null) updateFlags({ screen_share_on: false });
+    });
+    toast.add({
+      type: "info",
+      title: "Screen sharing turned off",
+      description: "The host turned off screen sharing for this meet.",
+    });
+  }, [allowScreenShare, screenShareOn, toggleScreenShare, updateFlags]);
 
   React.useEffect(() => {
     if (status !== "open") return;
@@ -109,6 +155,9 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       onHostAction={sendHostAction}
       micOn={isMicOn}
       cameraOn={isCameraOn}
+      isScreenSharing={screenShareOn}
+      canScreenShare={allowScreenShare}
+      onToggleScreenShare={() => void handleToggleScreenShare()}
       isHandRaised={isHandRaised}
       onToggleHand={() => updateFlags({ hand_raised: !isHandRaised })}
       onToggleMic={() => setIsMicOn((on) => !on)}

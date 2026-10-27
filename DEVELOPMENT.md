@@ -114,8 +114,8 @@ boundary.
 | 10 — Screen sharing | ✅ done |
 | 11 — Complete meeting experience | ✅ done |
 | 12 — Failure + reconnection | ✅ done |
-| 13 — Security hardening | ⬜ |
-| 14 — History + polish | ⬜ |
+| 13 — Security hardening | ✅ done |
+| 14 — History + polish | ✅ done |
 | 15 — Full E2E validation | ⬜ |
 
 ## Conventions

@@ -79,63 +79,134 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
   React.useEffect(() => {
     let cancelled = false;
     let room: Room | null = null;
-    const detach: Array<[RoomEvent, () => void]> = [];
+    // Set after the first successful handshake: from then on an unexpected
+    // Disconnected is a real session loss (LiveKit gave up, e.g. an expired
+    // token) rather than a failed initial connect.
+    let hadSession = false;
+    let recovered = false;
+    const detach: Array<[RoomEvent, () => void, Room]> = [];
 
     const refresh = () => {
       if (!room) return;
       setTiles(readTiles(room));
       setSpeakingIds(room.activeSpeakers.map((participant) => participant.identity));
     };
+
     const onState = () => {
       if (!room || cancelled) return;
-      if (room.state === ConnectionState.Reconnecting) setStatus("reconnecting");
-      else if (room.state === ConnectionState.Connected) setStatus("connected");
-      else if (room.state === ConnectionState.Disconnected) setStatus("failed");
+      if (room.state === ConnectionState.Reconnecting) {
+        setStatus("reconnecting");
+        return;
+      }
+      if (room.state === ConnectionState.Connected) {
+        setStatus("connected");
+        return;
+      }
+      if (room.state !== ConnectionState.Disconnected) return;
+      // The handshake loop owns failures before a session exists...
+      if (!hadSession) return;
+      // ...and we allow exactly one re-mint + reconnect (REALTIME.md:126)...
+      if (!recovered) {
+        recovered = true;
+        void recover();
+        return;
+      }
+      setStatus("failed");
     };
 
-    (async () => {
+    const detachRoom = (target: Room) => {
+      for (const [event, handler, owner] of detach) {
+        if (owner === target) target.off(event, handler);
+      }
+    };
+
+    const buildRoom = (): Room => {
+      const next = new Room({ adaptiveStream: true, dynacast: true });
+      for (const event of ROOM_EVENTS) {
+        next.on(event, refresh);
+        detach.push([event, refresh, next]);
+      }
+      next.on(RoomEvent.ConnectionStateChanged, onState);
+      detach.push([RoomEvent.ConnectionStateChanged, onState, next]);
+      return next;
+    };
+
+    /** Handshake against a freshly minted token; false when superseded. */
+    const handoff = async (target: Room): Promise<boolean> => {
+      const credentials = await meetingsApi.getToken(code);
+      if (cancelled) return false;
+      await target.connect(credentials.url, credentials.token);
+      if (cancelled) {
+        target.disconnect();
+        return false;
+      }
+      roomRef.current = target;
+      await Promise.allSettled([
+        target.localParticipant.setMicrophoneEnabled(desiredRef.current.micOn),
+        target.localParticipant.setCameraEnabled(desiredRef.current.cameraOn),
+      ]);
+      if (cancelled) return false;
+      setStatus("connected");
+      refresh();
+      return true;
+    };
+
+    /** One bounded recovery: tear the dead room down, re-mint, reconnect. */
+    const recover = async () => {
+      const previous = room;
+      if (previous) {
+        detachRoom(previous);
+        previous.disconnect();
+      }
       try {
-        setStatus("connecting");
-        setError(null);
-        const credentials = await meetingsApi.getToken(code);
-        if (cancelled) return;
-
-        room = new Room({ adaptiveStream: true, dynacast: true });
-        for (const event of ROOM_EVENTS) {
-          room.on(event, refresh);
-          detach.push([event, refresh]);
-        }
-        room.on(RoomEvent.ConnectionStateChanged, onState);
-        detach.push([RoomEvent.ConnectionStateChanged, onState]);
-
-        await room.connect(credentials.url, credentials.token);
-        if (cancelled) {
-          room.disconnect();
-          return;
-        }
-        roomRef.current = room;
-        await Promise.allSettled([
-          room.localParticipant.setMicrophoneEnabled(desiredRef.current.micOn),
-          room.localParticipant.setCameraEnabled(desiredRef.current.cameraOn),
-        ]);
-        if (cancelled) return;
-        setStatus("connected");
-        setTiles(readTiles(room));
-        setSpeakingIds(room.activeSpeakers.map((participant) => participant.identity));
+        room = buildRoom();
+        setStatus("reconnecting");
+        const connected = await handoff(room);
+        if (connected && !cancelled) setError(null);
       } catch (err) {
         if (cancelled) return;
+        room = null;
+        roomRef.current = null;
         setStatus("failed");
         setError(err instanceof Error ? err.message : String(err));
       }
+    };
+
+    (async () => {
+      setStatus("connecting");
+      setError(null);
+      // Initial handshake retries once with a fresh token (expired mint or a
+      // transient network failure); each attempt gets its own Room.
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 2 && !cancelled; attempt += 1) {
+        try {
+          room = buildRoom();
+          const connected = await handoff(room);
+          if (connected) {
+            hadSession = true;
+            return;
+          }
+          return; // superseded by unmount
+        } catch (err) {
+          lastError = err;
+          if (cancelled) return;
+          if (room) {
+            detachRoom(room);
+            room.disconnect();
+            room = null;
+          }
+        }
+      }
+      if (cancelled) return;
+      setStatus("failed");
+      setError(lastError instanceof Error ? lastError.message : String(lastError));
     })();
 
     return () => {
       cancelled = true;
       roomRef.current = null;
-      if (room) {
-        for (const [event, handler] of detach) room.off(event, handler);
-        room.disconnect();
-      }
+      for (const [event, handler, owner] of detach) owner.off(event, handler);
+      if (room) room.disconnect();
       setTiles([]);
       setSpeakingIds([]);
     };

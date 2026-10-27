@@ -117,14 +117,17 @@ describe("useLiveKitRoom", () => {
     expect(room.disconnect).toHaveBeenCalled();
   });
 
-  it("reports failure when the token cannot be minted", async () => {
+  it("reports failure when the token can never be minted", async () => {
     const { meetingsApi } = await import("@/lib/api");
-    vi.mocked(meetingsApi.getToken).mockRejectedValueOnce(new Error("403 forbidden"));
+    vi.mocked(meetingsApi.getToken)
+      .mockRejectedValueOnce(new Error("403 forbidden"))
+      .mockRejectedValueOnce(new Error("403 forbidden"));
 
     const { result } = renderHook(() => useLiveKitRoom("ktq-vxm-pnz", true, true));
 
     await waitFor(() => expect(result.current.status).toBe("failed"));
     expect(result.current.error).toContain("403");
+    expect(vi.mocked(meetingsApi.getToken)).toHaveBeenCalledTimes(2);
   });
 
   it("toggles the local screen-share publication", async () => {
@@ -171,5 +174,56 @@ describe("useLiveKitRoom", () => {
     act(() => room.emit(RoomEvent.ActiveSpeakersChanged));
 
     await waitFor(() => expect(result.current.speakingIds).toEqual(["u2"]));
+  });
+
+  it("retries the handshake with a fresh token when the first attempt fails", async () => {
+    const { meetingsApi } = await import("@/lib/api");
+    vi.mocked(meetingsApi.getToken).mockRejectedValueOnce(new Error("network blip"));
+
+    const { result } = renderHook(() => useLiveKitRoom("ktq-vxm-pnz", true, true));
+
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(vi.mocked(meetingsApi.getToken)).toHaveBeenCalledTimes(2);
+    // Each attempt builds its own Room so a poisoned socket is never reused.
+    expect(FakeRoom.instances).toHaveLength(2);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("re-mints a token and recovers once after a mid-session disconnect", async () => {
+    const { meetingsApi } = await import("@/lib/api");
+    const { result } = renderHook(() => useLiveKitRoom("ktq-vxm-pnz", true, true));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    const { RoomEvent } = await import("livekit-client");
+
+    const dead = FakeRoom.last();
+    act(() => {
+      dead.state = "disconnected";
+      dead.emit(RoomEvent.ConnectionStateChanged);
+    });
+    await waitFor(() => expect(result.current.status).toBe("reconnecting"));
+
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(vi.mocked(meetingsApi.getToken)).toHaveBeenCalledTimes(2);
+    expect(FakeRoom.instances).toHaveLength(2);
+    expect(FakeRoom.last()).not.toBe(dead);
+  });
+
+  it("fails after the single recovery attempt also dies", async () => {
+    const { meetingsApi } = await import("@/lib/api");
+    const { result } = renderHook(() => useLiveKitRoom("ktq-vxm-pnz", true, true));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    const { RoomEvent } = await import("livekit-client");
+
+    vi.mocked(meetingsApi.getToken).mockRejectedValueOnce(new Error("token mint down"));
+    act(() => {
+      const dead = FakeRoom.last();
+      dead.state = "disconnected";
+      dead.emit(RoomEvent.ConnectionStateChanged);
+    });
+
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.error).toContain("token mint down");
+    // Exactly one recovery — never a retry storm.
+    expect(vi.mocked(meetingsApi.getToken)).toHaveBeenCalledTimes(2);
   });
 });

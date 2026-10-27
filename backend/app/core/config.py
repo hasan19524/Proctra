@@ -55,12 +55,13 @@ class Settings(BaseSettings):
     livekit_api_key: str = Field(default="procto-dev-key", alias="LIVEKIT_API_KEY")
     livekit_api_secret: str = Field(default="procto-dev-secret", alias="LIVEKIT_API_SECRET")
 
-    # ---- CORS ----
+    # ---- CORS / Security ----
     backend_cors_origins: list[str] = Field(
-        default=["http://localhost:3000"],
+        default=["http://localhost:3001", "http://localhost:3000"],
         alias="BACKEND_CORS_ORIGINS",
     )
-    frontend_url: str = Field(default="http://localhost:3000", alias="FRONTEND_URL")
+    frontend_url: str = Field(default="http://localhost:3001", alias="FRONTEND_URL")
+    trusted_hosts: list[str] = Field(default=["*"], alias="TRUSTED_HOSTS")
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod

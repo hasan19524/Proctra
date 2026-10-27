@@ -116,7 +116,7 @@ boundary.
 | 12 — Failure + reconnection | ✅ done |
 | 13 — Security hardening | ✅ done |
 | 14 — History + polish | ✅ done |
-| 15 — Full E2E validation | ⬜ |
+| 15 — Full E2E validation | ✅ done |
 
 ## Conventions
 

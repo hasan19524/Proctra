@@ -17,6 +17,7 @@ from app.schemas.meeting import (
     CreateMeetingRequest,
     LiveKitTokenOut,
     LiveKitTokenRequest,
+    MeetingHistoryOut,
     MeetingOut,
 )
 from app.services import meeting_service
@@ -37,6 +38,16 @@ def _meeting_out(meeting: Meeting) -> MeetingOut:
     out = MeetingOut.model_validate(meeting)
     out.has_password = meeting.password_hash is not None
     return out
+
+
+@router.get("/history", response_model=list[MeetingHistoryOut])
+async def get_meeting_history(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[MeetingHistoryOut]:
+    """List meetings the current user hosted or joined (Phase 14)."""
+    meetings = await meeting_service.list_user_meetings(session, user.id)
+    return [MeetingHistoryOut.model_validate(m) for m in meetings]
 
 
 @router.post("", response_model=MeetingOut, status_code=status.HTTP_201_CREATED)

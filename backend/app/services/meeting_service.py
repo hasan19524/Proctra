@@ -74,3 +74,22 @@ async def get_meeting_by_code(session: AsyncSession, code: str) -> Meeting:
     if meeting is None:
         raise MeetingNotFoundError(normalized)
     return meeting
+
+
+async def list_user_meetings(session: AsyncSession, user_id: UUID) -> list[Meeting]:
+    """List meetings the user hosted or participated in (Phase 14)."""
+    from app.models.participant import MeetingParticipant
+
+    stmt = (
+        select(Meeting)
+        .join(
+            MeetingParticipant,
+            MeetingParticipant.meeting_id == Meeting.id,
+            isouter=True,
+        )
+        .where((Meeting.host_id == user_id) | (MeetingParticipant.user_id == user_id))
+        .distinct()
+        .order_by(Meeting.created_at.desc())
+    )
+    result = await session.scalars(stmt)
+    return list(result.all())

@@ -36,6 +36,22 @@ class MeetingOut(BaseModel):
     ended_at: datetime | None = None
 
 
+class MeetingHistoryOut(BaseModel):
+    """Meeting summary for the user's history (Phase 14)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    code: str
+    title: str | None
+    host_id: UUID
+    status: str
+    created_at: datetime
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    joined_at: datetime | None = None
+
+
 class LiveKitTokenRequest(BaseModel):
     """Join password echoed back for verification when the meeting has one."""
 

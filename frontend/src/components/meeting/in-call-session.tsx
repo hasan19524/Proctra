@@ -7,12 +7,14 @@ import { useLiveKitRoom } from "@/hooks/use-livekit-room";
 import { useMeetingWs } from "@/hooks/use-meeting-ws";
 import { InCallView } from "@/components/meeting/in-call-view";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 
 interface InCallSessionProps {
   code: string;
   displayName: string;
   micOn: boolean;
   cameraOn: boolean;
+  password?: string;
   onLeave: () => void;
 }
 
@@ -23,7 +25,7 @@ interface InCallSessionProps {
  * server rebuilds presence on rejoin). Also renders terminal states — removed
  * by the host or the meet having ended — instead of the call shell.
  */
-export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: InCallSessionProps) {
+export function InCallSession({ code, displayName, micOn, cameraOn, password, onLeave }: InCallSessionProps) {
   const [isMicOn, setIsMicOn] = React.useState(micOn);
   const [isCameraOn, setIsCameraOn] = React.useState(cameraOn);
   const [handledMuteNonce, setHandledMuteNonce] = React.useState(0);
@@ -38,22 +40,26 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
     reactions,
     isRemoved,
     selfMuteNonce,
+    isWaiting,
+    isRejected,
+    pendingJoins,
     updateFlags,
     sendChat,
     sendHostAction,
     sendNoteSave,
     sendReaction,
-  } = useMeetingWs(code);
+  } = useMeetingWs(code, password);
 
   // Hand raise is server state: the flag round-trips through presence so
   // everyone (including a reconnecting you) sees the same hand.
   const self = participants.find((participant) => participant.user_id === selfUserId) ?? null;
+  const isHost = self?.is_host ?? false;
   const isHandRaised = self?.hand_raised ?? false;
 
   // Media (LiveKit SFU) runs beside the app WS: roster on one socket, real
   // audio/video on the SFU. A media failure degrades to chat-only. Flags are
   // the local state (not the entry props) so toggles reach LiveKit too.
-  const media = useLiveKitRoom(code, isMicOn, isCameraOn);
+  const media = useLiveKitRoom(isWaiting || isRejected ? null : code, isMicOn, isCameraOn, password);
   const mediaStatusRef = React.useRef(media.status);
   React.useEffect(() => {
     if (media.status === "failed" && mediaStatusRef.current !== "failed") {
@@ -123,6 +129,22 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
     updateFlags({ mic_on: isMicOn, camera_on: isCameraOn });
   }, [status, isMicOn, isCameraOn, updateFlags]);
 
+  if (isRejected) {
+    return <RejectedScreen onLeave={onLeave} />;
+  }
+
+  if (isWaiting) {
+    return <WaitingScreen onLeave={onLeave} />;
+  }
+
+  if (isRejected) {
+    return <RejectedScreen onLeave={onLeave} />;
+  }
+
+  if (isWaiting) {
+    return <WaitingScreen onLeave={onLeave} />;
+  }
+
   if (isRemoved || meeting?.status === "ended") {
     return (
       <SessionNotice
@@ -150,6 +172,9 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       reactions={reactions}
       mediaTiles={media.tiles}
       speakingIds={media.speakingIds}
+      pendingJoins={isHost ? pendingJoins : []}
+      onApproveJoin={(userId) => sendHostAction("approve", { target_id: userId })}
+      onRejectJoin={(userId) => sendHostAction("reject", { target_id: userId })}
       onSendChat={sendChat}
       onSendNote={(visibility, text) => sendNoteSave(visibility, { text })}
       onSendReaction={sendReaction}
@@ -165,6 +190,33 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       onToggleCamera={() => setIsCameraOn((on) => !on)}
       onLeave={onLeave}
     />
+  );
+}
+
+function WaitingScreen({ onLeave }: { onLeave: () => void }) {
+  return (
+    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-4 px-6 text-center">
+      <Spinner className="size-6" />
+      <h1 className="text-2xl font-semibold tracking-tight">Waiting for the host to let you in</h1>
+      <p className="text-muted-foreground max-w-sm text-sm">
+        You&apos;ll join automatically when the host admits you to this meeting.
+      </p>
+      <Button variant="outline" onClick={onLeave}>
+        Leave
+      </Button>
+    </main>
+  );
+}
+
+function RejectedScreen({ onLeave }: { onLeave: () => void }) {
+  return (
+    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-4 px-6 text-center">
+      <h1 className="text-2xl font-semibold tracking-tight">You were not admitted</h1>
+      <p className="text-muted-foreground max-w-sm text-sm">
+        The host declined your request to join this meeting.
+      </p>
+      <Button onClick={onLeave}>Back to home</Button>
+    </main>
   );
 }
 

@@ -14,6 +14,7 @@ export interface JoinOptions {
   displayName: string;
   micOn: boolean;
   cameraOn: boolean;
+  password?: string;
 }
 
 interface PreJoinLobbyProps {
@@ -41,6 +42,7 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
   const [displayName, setDisplayName] = React.useState(defaultName);
   const [micOn, setMicOn] = React.useState(true);
   const [cameraOn, setCameraOn] = React.useState(true);
+  const [password, setPassword] = React.useState("");
   const [mediaState, setMediaState] = React.useState<MediaState>("acquiring");
 
   React.useEffect(() => {
@@ -216,6 +218,18 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
             />
           </div>
 
+          <div className="mx-auto mt-3 max-w-sm">
+            <Input
+              type="password"
+              aria-label="Meeting password"
+              placeholder="Meeting password (if required)"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="h-10 rounded-full px-4 text-center"
+              autoComplete="off"
+            />
+          </div>
+
           <div className="mt-5 flex justify-center">
             <Button
               type="button"
@@ -226,6 +240,7 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
                   displayName: displayName.trim(),
                   micOn,
                   cameraOn,
+                  password: password.trim() || undefined,
                 })
               }
               className="rounded-full px-8"

@@ -85,7 +85,7 @@ describe("useLiveKitRoom", () => {
     await waitFor(() => expect(result.current.status).toBe("connected"));
 
     const { meetingsApi } = await import("@/lib/api");
-    expect(meetingsApi.getToken).toHaveBeenCalledWith("ktq-vxm-pnz");
+    expect(meetingsApi.getToken).toHaveBeenCalledWith("ktq-vxm-pnz", undefined);
 
     const room = FakeRoom.last();
     expect(room.connect).toHaveBeenCalledWith("ws://localhost:7880", "tk-test");

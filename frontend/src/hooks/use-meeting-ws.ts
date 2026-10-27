@@ -125,7 +125,7 @@ function upsertMessages(existing: WsChatMessage[], incoming: WsChatMessage[]): W
  * (`sync.state` tail + `chat.message` frames). The socket is created once per
  * `code` and torn down on unmount.
  */
-export function useMeetingWs(code: string | null) {
+export function useMeetingWs(code: string | null, password?: string) {
   const [status, setStatus] = React.useState<WsStatus>("closed");
   const [participants, setParticipants] = React.useState<WsParticipant[]>([]);
   const [selfUserId, setSelfUserId] = React.useState<string | null>(null);
@@ -135,10 +135,18 @@ export function useMeetingWs(code: string | null) {
   const [reactions, setReactions] = React.useState<WsReaction[]>([]);
   const [isRemoved, setIsRemoved] = React.useState(false);
   const [selfMuteNonce, setSelfMuteNonce] = React.useState(0);
+  const [isWaiting, setIsWaiting] = React.useState(false);
+  const [isRejected, setIsRejected] = React.useState(false);
+  const [pendingJoins, setPendingJoins] = React.useState<Array<{ user_id: string; name: string }>>([]);
   const socketRef = React.useRef<MeetingSocket | null>(null);
   // The self id arrives with sync.state, but frames can reference it first;
   // a ref lets early events match without re-subscribing the socket.
   const selfUserIdRef = React.useRef<string | null>(null);
+  const passwordRef = React.useRef<string | undefined>(password);
+
+  React.useEffect(() => {
+    passwordRef.current = password;
+  }, [password]);
 
   React.useEffect(() => {
     selfUserIdRef.current = selfUserId;
@@ -147,12 +155,13 @@ export function useMeetingWs(code: string | null) {
   React.useEffect(() => {
     if (!code) return;
 
-    const socket = new MeetingSocket(code, getAccessToken);
+    const socket = new MeetingSocket(code, getAccessToken, () => passwordRef.current);
     socketRef.current = socket;
 
     const unsubscribes = [
       socket.onStatus(setStatus),
       socket.on<SyncStatePayload>("sync.state", (payload) => {
+        setIsWaiting(false);
         if (payload?.self?.user_id) setSelfUserId(payload.self.user_id);
         if (Array.isArray(payload?.participants)) setParticipants(payload.participants);
         if (payload?.meeting) setMeeting(payload.meeting);
@@ -167,6 +176,44 @@ export function useMeetingWs(code: string | null) {
       socket.on<WsChatMessage>("chat.message", (payload) => {
         if (payload && typeof payload.id === "string") {
           setMessages((current) => upsertMessages(current, [payload]));
+        }
+      }),
+      socket.on("waiting.state", (payload: unknown) => {
+        const p = payload as { approved?: boolean } | undefined;
+        if (p?.approved) {
+          setIsWaiting(false);
+          socket.send("sync", {});
+        } else {
+          setIsWaiting(true);
+        }
+      }),
+      socket.on("waiting.approved", (payload: unknown) => {
+        const p = payload as { user_id?: string } | undefined;
+        if (p?.user_id && p.user_id === selfUserIdRef.current) {
+          setIsWaiting(false);
+          socket.send("sync", {});
+        }
+        if (p?.user_id) {
+          setPendingJoins((current) => current.filter((entry) => entry.user_id !== p.user_id));
+        }
+      }),
+      socket.on("waiting.rejected", (payload: unknown) => {
+        const p = payload as { user_id?: string } | undefined;
+        if (p?.user_id && p.user_id === selfUserIdRef.current) {
+          setIsRejected(true);
+          setIsWaiting(false);
+        }
+        if (p?.user_id) {
+          setPendingJoins((current) => current.filter((entry) => entry.user_id !== p.user_id));
+        }
+      }),
+      socket.on("join.request", (payload: unknown) => {
+        const p = payload as { user_id?: string; name?: string } | undefined;
+        if (p?.user_id && p.user_id !== selfUserIdRef.current) {
+          setPendingJoins((current) => {
+            if (current.some((entry) => entry.user_id === p.user_id)) return current;
+            return [...current, { user_id: p.user_id!, name: p.name ?? "" }];
+          });
         }
       }),
       socket.on<MeetingLockedPayload>("meeting.locked", (payload) => {
@@ -191,6 +238,12 @@ export function useMeetingWs(code: string | null) {
       }),
       socket.on("meeting.ended", () => {
         setMeeting((current) => (current ? { ...current, status: "ended" } : current));
+        setIsWaiting(false);
+      }),
+      socket.on<ParticipantEventPayload>("participant.joined", (payload) => {
+        if (payload?.user_id) {
+          setPendingJoins((current) => current.filter((entry) => entry.user_id !== payload.user_id));
+        }
       }),
       socket.on<ParticipantEventPayload>("participant.removed", (payload) => {
         if (payload?.user_id && payload.user_id === selfUserIdRef.current) {
@@ -282,6 +335,9 @@ export function useMeetingWs(code: string | null) {
     reactions,
     isRemoved,
     selfMuteNonce,
+    isWaiting,
+    isRejected,
+    pendingJoins,
     updateFlags,
     sendChat,
     sendHostAction,

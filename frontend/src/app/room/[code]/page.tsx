@@ -126,6 +126,7 @@ function RoomGate({ code }: RoomParams) {
       displayName={join.displayName}
       micOn={join.micOn}
       cameraOn={join.cameraOn}
+      password={join.password}
       onLeave={() => router.push("/")}
     />
   );

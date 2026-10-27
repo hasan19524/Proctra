@@ -23,6 +23,9 @@ class LocalConnection:
     websocket: "WebSocket"
     is_host: bool = False
     closed: bool = False
+    # Queued in the waiting room: no presence/attendance until admitted, and
+    # only WAITING_VISIBLE_FRAMES reach this socket (Phase 13).
+    waiting: bool = False
     # Set by host kick/end paths so the target's receive loop unwinds promptly
     # even when the ASGI server won't deliver a disconnect to a pending receive.
     kick: "asyncio.Event" = field(default_factory=asyncio.Event)

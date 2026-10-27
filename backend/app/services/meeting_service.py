@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import hash_password
 from app.models.meeting import Meeting
 
 # Unambiguous alphabet (no 0/o/1/l) and Meet-style three groups of three.
@@ -38,10 +39,22 @@ async def create_meeting(
     session: AsyncSession,
     host_id: UUID,
     title: str | None = None,
+    password: str | None = None,
+    waiting_room: bool = False,
 ) -> Meeting:
-    """Create a meeting owned by ``host_id``, retrying on code collisions."""
+    """Create a meeting owned by ``host_id``, retrying on code collisions.
+
+    ``password`` is hashed (Argon2id, SECURITY.md §1) before it touches the
+    database; the plain value never leaves this function.
+    """
     for attempt in range(CODE_ATTEMPTS):
-        meeting = Meeting(code=generate_code(), title=title, host_id=host_id)
+        meeting = Meeting(
+            code=generate_code(),
+            title=title,
+            host_id=host_id,
+            password_hash=hash_password(password) if password else None,
+            waiting_room=waiting_room,
+        )
         session.add(meeting)
         try:
             await session.flush()

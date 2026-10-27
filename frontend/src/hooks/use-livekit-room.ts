@@ -64,7 +64,7 @@ function readTiles(room: Room): MediaTile[] {
  * with the caller's chosen flags, and project participants as renderable
  * tiles (identity = user id so tiles match roster entries).
  */
-export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) {
+export function useLiveKitRoom(code: string | null, micOn: boolean, cameraOn: boolean, password?: string) {
   const [status, setStatus] = React.useState<MediaStatus>("idle");
   const [tiles, setTiles] = React.useState<MediaTile[]>([]);
   const [speakingIds, setSpeakingIds] = React.useState<string[]>([]);
@@ -103,7 +103,9 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
         return;
       }
       if (room.state !== ConnectionState.Disconnected) return;
-      // The handshake loop owns failures before a session exists...
+      // Before a session exists, the handshake loop reports failure; do not
+      // set "failed" from a late Disconnected event fired by a room being torn
+      // down or rejected.
       if (!hadSession) return;
       // ...and we allow exactly one re-mint + reconnect (REALTIME.md:126)...
       if (!recovered) {
@@ -133,7 +135,7 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
 
     /** Handshake against a freshly minted token; false when superseded. */
     const handoff = async (target: Room): Promise<boolean> => {
-      const credentials = await meetingsApi.getToken(code);
+      const credentials = await meetingsApi.getToken(code!, password);
       if (cancelled) return false;
       await target.connect(credentials.url, credentials.token);
       if (cancelled) {
@@ -210,7 +212,7 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
       setTiles([]);
       setSpeakingIds([]);
     };
-  }, [code]);
+  }, [code, password]);
 
   // Push mic/camera toggles into LiveKit once connected; before that the
   // post-connect apply above reads the latest desired flags.

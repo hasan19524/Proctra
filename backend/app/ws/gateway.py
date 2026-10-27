@@ -9,18 +9,23 @@ notes, and transient reactions (whitelisted labels, never persisted).
 import asyncio
 import contextlib
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 
+from app.core.config import settings
+from app.core.ratelimit import rate_limit
 from app.core.redis import get_pubsub_client, get_redis
+from app.core.security import verify_password
 from app.db import SessionLocal
 from app.models.meeting import Meeting
 from app.models.message import MAX_BODY_LENGTH
 from app.models.note import MAX_NOTE_CONTENT_CHARS, VISIBILITIES, VISIBILITY_HOST_ONLY
 from app.models.user import User
+from app.services.audit_service import audit
 from app.services.auth_service import get_user_from_token
 from app.services.meeting_service import (
     MeetingNotFoundError,
@@ -40,6 +45,7 @@ from app.ws.envelope import (
     CLOSE_FORBIDDEN,
     CLOSE_IDLE_TIMEOUT,
     CLOSE_NOT_FOUND,
+    CLOSE_PROTOCOL_ERROR,
     CLOSE_UNAUTHORIZED,
     ProtocolError,
     parse_client_frame,
@@ -47,9 +53,12 @@ from app.ws.envelope import (
 )
 from app.ws.registry import get_registry
 from app.ws.seq import current_seq, next_seq
+from app.ws.waiting import APPROVED, REJECTED, get_decision, set_decision
 
 if TYPE_CHECKING:
     from app.ws.registry import LocalConnection
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -57,6 +66,14 @@ router = APIRouter()
 IDLE_TIMEOUT_SECONDS = 60.0
 # Upper bound for one reconnect replay (the snapshot also carries a 50-msg tail).
 REPLAY_LIMIT = 500
+# Join budget per (user, meeting) per minute: bounds meeting-password guessing
+# (SECURITY.md §4) while leaving plenty for reconnect churn.
+JOIN_RATE = (15, 60)
+# Frames a queued (waiting-room) connection may see: nothing about meeting
+# content leaks before the host admits them (SECURITY.md §6).
+WAITING_VISIBLE_FRAMES = frozenset(
+    {"waiting.approved", "waiting.rejected", "meeting.ended", "meeting.locked"}
+)
 # Transient reactions are a closed set (matches the frontend ReactionBar).
 REACTION_LABELS = frozenset(
     {"Heart", "Thumbs up", "Party", "Clap", "Laugh", "Wow", "Sad", "Angry", "Thumbs down"}
@@ -100,9 +117,21 @@ def _is_host_only_note(frame_text: str) -> bool:
     return isinstance(payload, dict) and payload.get("visibility") == VISIBILITY_HOST_ONLY
 
 
+def _frame_type(frame_text: str) -> str | None:
+    """Best-effort event type of a serialized frame (malformed -> None)."""
+    try:
+        parsed = json.loads(frame_text)
+    except (ValueError, TypeError):
+        return None
+    frame_type = parsed.get("type") if isinstance(parsed, dict) else None
+    return frame_type if isinstance(frame_type, str) else None
+
+
 async def _deliver(conn: "LocalConnection", frame_text: str) -> None:
     """Send one broadcast frame to a local connection, honoring visibility."""
     if _is_host_only_note(frame_text) and not conn.is_host:
+        return
+    if conn.waiting and _frame_type(frame_text) not in WAITING_VISIBLE_FRAMES:
         return
     await _send(conn.websocket, frame_text)
 
@@ -130,6 +159,8 @@ async def _relay(websocket: WebSocket, meeting_code: str, conn_id: str, pubsub: 
             if conn is None or conn.closed:
                 break
             if _is_host_only_note(data) and not conn.is_host:
+                continue
+            if conn.waiting and _frame_type(data) not in WAITING_VISIBLE_FRAMES:
                 continue
             await _send(websocket, data)
     except asyncio.CancelledError:
@@ -387,6 +418,13 @@ async def _handle_host_action(
 
         if action == "lock" or action == "unlock":
             fresh.is_locked = action == "lock"
+            await audit(
+                session,
+                meeting_id=fresh.id,
+                actor_id=user.id,
+                action=action,
+                detail={"is_locked": fresh.is_locked},
+            )
             await session.commit()
             meeting.is_locked = fresh.is_locked
             await _broadcast(
@@ -399,6 +437,7 @@ async def _handle_host_action(
             if fresh.status != "ended":
                 fresh.status = "ended"
                 fresh.ended_at = datetime.now(UTC)
+                await audit(session, meeting_id=fresh.id, actor_id=user.id, action="end")
                 await session.commit()
             meeting.status = "ended"
             local = list(registry.in_meeting(meeting_code))
@@ -422,6 +461,14 @@ async def _handle_host_action(
             if target_id not in present:
                 await _send_ws_error(websocket, "invalid_target", "Participant not in the meeting")
                 return
+            await audit(
+                session,
+                meeting_id=fresh.id,
+                actor_id=user.id,
+                action="mute_participant",
+                target_id=_parse_uuid(target_id),
+            )
+            await session.commit()
             await _broadcast(
                 meeting_code,
                 server_frame(
@@ -443,6 +490,14 @@ async def _handle_host_action(
             if not targets:
                 await _send_ws_error(websocket, "invalid_target", "Participant not in the meeting")
                 return
+            await audit(
+                session,
+                meeting_id=fresh.id,
+                actor_id=user.id,
+                action="remove",
+                target_id=_parse_uuid(target_id),
+            )
+            await session.commit()
             for target in targets:
                 await _send(
                     target.websocket,
@@ -466,6 +521,17 @@ async def _handle_host_action(
                     setattr(fresh, field, value)
                     changed = True
             if changed:
+                await audit(
+                    session,
+                    meeting_id=fresh.id,
+                    actor_id=user.id,
+                    action="set_permissions",
+                    detail={
+                        "allow_chat": fresh.allow_chat,
+                        "allow_reactions": fresh.allow_reactions,
+                        "allow_screen_share": fresh.allow_screen_share,
+                    },
+                )
                 await session.commit()
                 meeting.allow_chat = fresh.allow_chat
                 meeting.allow_reactions = fresh.allow_reactions
@@ -483,6 +549,67 @@ async def _handle_host_action(
             )
             return
 
+        if action in ("approve", "reject"):
+            target_id = payload.get("target_id")
+            if not isinstance(target_id, str) or not target_id:
+                await _send_ws_error(websocket, "invalid_target", "target_id is required")
+                return
+            if target_id == str(user.id):
+                await _send_ws_error(websocket, "invalid_target", "Cannot decide on yourself")
+                return
+            target_uuid = _parse_uuid(target_id)
+            waiting_here = any(
+                c.user_id == target_id and c.waiting for c in registry.in_meeting(meeting_code)
+            )
+            if not waiting_here and await get_decision(meeting_code, target_id) is None:
+                # Phantom-id guard: no live request on this worker and no prior
+                # decision. (Waiting sockets on *other* workers aren't visible
+                # to this per-process registry; deployment is single-worker.)
+                await _send_ws_error(websocket, "invalid_target", "No join request to decide on")
+                return
+            if action == "approve":
+                if fresh.status == "ended":
+                    await _send_ws_error(websocket, "not_found", "Meeting has ended")
+                    return
+                await set_decision(meeting_code, target_id, APPROVED)
+            else:
+                await set_decision(meeting_code, target_id, REJECTED)
+            await audit(
+                session,
+                meeting_id=fresh.id,
+                actor_id=user.id,
+                action="waiting_approve" if action == "approve" else "waiting_reject",
+                target_id=target_uuid,
+            )
+            await session.commit()
+
+            if action == "reject":
+                # Local waiters are closed here: terminal frame first, then
+                # the close (D16); remote workers learn from the flag/frames.
+                for target in [
+                    c
+                    for c in registry.in_meeting(meeting_code)
+                    if c.user_id == target_id and c.waiting
+                ]:
+                    await _send(
+                        target.websocket,
+                        server_frame("waiting.rejected", {"user_id": target_id}),
+                    )
+                    target.closed = True
+                    target.kick.set()
+                    await _close(target.websocket, CLOSE_FORBIDDEN, "rejected")
+            await _broadcast(
+                meeting_code,
+                server_frame(
+                    "waiting.approved" if action == "approve" else "waiting.rejected",
+                    {"user_id": target_id},
+                ),
+            )
+            logger.info(
+                "meeting=%s user=%s action=%s target=%s", meeting_code, user.id, action, target_id
+            )
+            return
+
         await _send_ws_error(websocket, "unknown_action", f"Unsupported host action: {action}")
 
 
@@ -491,9 +618,17 @@ async def ws_meeting(
     websocket: WebSocket,
     meeting_code: str,
     token: str | None = Query(default=None),
+    password: str | None = Query(default=None),
 ) -> None:
     """Authenticated app-WS endpoint for one meeting (REALTIME.md §1)."""
     code = normalize_code(meeting_code)
+
+    # 0. Origin allow-list: browsers always send Origin on a WS upgrade, so a
+    #    cross-site page cannot dial into a meeting on a victim's session.
+    origin = websocket.headers.get("origin")
+    if origin and origin not in settings.backend_cors_origins and origin != settings.frontend_url:
+        await _reject(websocket, CLOSE_PROTOCOL_ERROR, "origin_not_allowed", "Origin not allowed")
+        return
 
     # 1. Authenticate the upgrade (access token as query param).
     if not token:
@@ -516,7 +651,7 @@ async def ws_meeting(
 
         is_host = str(meeting.host_id) == str(user.id)
 
-    # 2. Authorize against the meeting state (Phase 6 adds membership/waiting room).
+    # 2. Authorize against the meeting state.
     if meeting.status == "ended":
         await _reject(websocket, CLOSE_FORBIDDEN, "meeting_ended", "Meeting has ended")
         return
@@ -524,45 +659,84 @@ async def ws_meeting(
         await _reject(websocket, CLOSE_FORBIDDEN, "meeting_locked", "Meeting is locked")
         return
 
+    # 3. Join budget per (user, meeting): bounds meeting-password guessing.
+    try:
+        await rate_limit("ws_join", f"{user.id}:{code}", *JOIN_RATE)
+    except HTTPException:
+        await _reject(websocket, CLOSE_PROTOCOL_ERROR, "rate_limited", "Too many join attempts")
+        return
+
+    # 4. Meeting password (host bypasses; D23).
+    if (
+        meeting.password_hash is not None
+        and not is_host
+        and (not password or not verify_password(password, meeting.password_hash))
+    ):
+        err_code = "wrong_password" if password else "meeting_password_required"
+        await _reject(websocket, CLOSE_FORBIDDEN, err_code, "Meeting password required")
+        return
+
+    # 5. Waiting room: a non-host joins into a queue unless already admitted.
+    awaiting = False
+    if meeting.waiting_room and not is_host:
+        decision = await get_decision(code, str(user.id))
+        if decision == REJECTED:
+            await _reject(websocket, CLOSE_FORBIDDEN, "meeting_rejected", "Join rejected")
+            return
+        awaiting = decision != APPROVED
+
     await websocket.accept()
 
     registry = get_registry()
     conn = registry.add(code, str(user.id), websocket, is_host=is_host)
+    conn.waiting = awaiting
 
-    # 3. Presence + fan-out subscription before anything is announced.
+    # 6. Presence + fan-out subscription before anything is announced.
     #    Subscribe first: a broadcast published before the subscription is
     #    active would be silently lost.
     pubsub = get_pubsub_client().pubsub()
     await pubsub.subscribe(_channel(code))
     listener = asyncio.create_task(_relay(websocket, code, conn.conn_id, pubsub))
-    await presence.retain_user(code, str(user.id))
-    await presence.upsert_presence(
-        code,
-        str(user.id),
-        name=user.display_name,
-        is_host=is_host,
-    )
-    async with SessionLocal() as session:
-        await record_join(
-            session,
-            meeting_id=meeting.id,
-            user_id=user.id,
-            role="host" if is_host else "participant",
-        )
 
-    # 4. Handshake snapshot, then announce the join to everyone.
-    await _send(websocket, await _snapshot(code, meeting, str(user.id)))
-    await _broadcast(
-        code,
-        server_frame(
-            "participant.joined",
-            {"user_id": str(user.id), "name": user.display_name, "is_host": is_host},
-        ),
-    )
-    await _broadcast(
-        code,
-        server_frame("presence.state", {"participants": await presence.get_presence(code)}),
-    )
+    if awaiting:
+        # Queued: no presence row, no attendance row, no roster snapshot.
+        await _send(websocket, server_frame("waiting.state", {"approved": False}))
+        await _broadcast(
+            code,
+            server_frame(
+                "join.request",
+                {"user_id": str(user.id), "name": user.display_name},
+            ),
+        )
+    else:
+        await presence.retain_user(code, str(user.id))
+        await presence.upsert_presence(
+            code,
+            str(user.id),
+            name=user.display_name,
+            is_host=is_host,
+        )
+        async with SessionLocal() as session:
+            await record_join(
+                session,
+                meeting_id=meeting.id,
+                user_id=user.id,
+                role="host" if is_host else "participant",
+            )
+
+        # Handshake snapshot, then announce the join to everyone.
+        await _send(websocket, await _snapshot(code, meeting, str(user.id)))
+        await _broadcast(
+            code,
+            server_frame(
+                "participant.joined",
+                {"user_id": str(user.id), "name": user.display_name, "is_host": is_host},
+            ),
+        )
+        await _broadcast(
+            code,
+            server_frame("presence.state", {"participants": await presence.get_presence(code)}),
+        )
 
     try:
         await _serve(websocket, code, meeting, user, conn)
@@ -575,19 +749,22 @@ async def ws_meeting(
             # redis.asyncio's aclose is untyped in this release.
             await cast(Any, pubsub).aclose()
         registry.remove(conn)
-        became_gone = await presence.release_user(code, str(user.id))
-        if became_gone:
-            with contextlib.suppress(Exception):
-                async with SessionLocal() as session:
-                    await record_leave(session, meeting_id=meeting.id, user_id=user.id)
+        # A connection that was never admitted (still queued) has no presence
+        # refcount and no attendance row: there is nothing to release.
+        if not conn.waiting:
+            became_gone = await presence.release_user(code, str(user.id))
+            if became_gone:
+                with contextlib.suppress(Exception):
+                    async with SessionLocal() as session:
+                        await record_leave(session, meeting_id=meeting.id, user_id=user.id)
+                await _broadcast(
+                    code,
+                    server_frame("participant.left", {"user_id": str(user.id)}),
+                )
             await _broadcast(
                 code,
-                server_frame("participant.left", {"user_id": str(user.id)}),
+                server_frame("presence.state", {"participants": await presence.get_presence(code)}),
             )
-        await _broadcast(
-            code,
-            server_frame("presence.state", {"participants": await presence.get_presence(code)}),
-        )
 
 
 async def _receive_frame(websocket: WebSocket, conn: "LocalConnection") -> str:
@@ -622,6 +799,50 @@ async def _receive_frame(websocket: WebSocket, conn: "LocalConnection") -> str:
                 task.cancel()
 
 
+async def _promote(
+    websocket: WebSocket,
+    meeting_code: str,
+    meeting: Meeting,
+    user: User,
+    conn: "LocalConnection",
+) -> None:
+    """Admit a queued connection: presence, attendance, fan-out (Phase 13).
+
+    Runs on the waiter's own worker when their client re-syncs after seeing
+    ``waiting.approved`` — the Redis decision flag is the cross-worker signal
+    (D23), the promotion happens exactly where the socket lives, so only one
+    worker ever announces the join.
+    """
+    conn.waiting = False
+    is_host = str(meeting.host_id) == str(user.id)
+    await presence.retain_user(meeting_code, str(user.id))
+    await presence.upsert_presence(
+        meeting_code,
+        str(user.id),
+        name=user.display_name,
+        is_host=is_host,
+    )
+    async with SessionLocal() as session:
+        await record_join(
+            session,
+            meeting_id=meeting.id,
+            user_id=user.id,
+            role="host" if is_host else "participant",
+        )
+    await _broadcast(
+        meeting_code,
+        server_frame(
+            "participant.joined",
+            {"user_id": str(user.id), "name": user.display_name, "is_host": is_host},
+        ),
+    )
+    await _broadcast(
+        meeting_code,
+        server_frame("presence.state", {"participants": await presence.get_presence(meeting_code)}),
+    )
+    logger.info("meeting=%s user=%s waiting room admitted", meeting_code, user.id)
+
+
 async def _serve(
     websocket: WebSocket,
     meeting_code: str,
@@ -654,7 +875,34 @@ async def _serve(
 
         if frame.type == "ping":
             await _send(websocket, server_frame("pong", {"id": frame.id}))
-        elif frame.type == "sync":
+            continue
+
+        if conn.waiting:
+            # Queued in the waiting room: re-check the cross-worker decision
+            # flag on every frame (idle timeout bounds a silent socket).
+            decision = await get_decision(meeting_code, str(user.id))
+            if decision == REJECTED:
+                # Terminal frame before close (D16), then stop.
+                await _send(websocket, server_frame("waiting.rejected", {"user_id": str(user.id)}))
+                conn.closed = True
+                conn.kick.set()
+                await _close(websocket, CLOSE_FORBIDDEN, "rejected")
+                return
+            if decision != APPROVED:
+                if frame.type == "sync":
+                    await _send(websocket, server_frame("waiting.state", {"approved": False}))
+                else:
+                    await _send_ws_error(
+                        websocket,
+                        "awaiting_approval",
+                        "Waiting for the host to admit you",
+                    )
+                continue
+            # Approved: admit, then fall through so a `sync` frame (the
+            # client's reaction to waiting.approved) delivers the snapshot.
+            await _promote(websocket, meeting_code, meeting, user, conn)
+
+        if frame.type == "sync":
             await _send(websocket, await _snapshot(meeting_code, meeting, str(user.id)))
             last_seq = 0
             if isinstance(frame.payload, dict):

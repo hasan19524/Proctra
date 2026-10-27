@@ -32,9 +32,14 @@ const BACKOFF_MAX_MS = 15_000;
 const FATAL_CLOSE_CODES = new Set([4001, 4003, 4004, 4008]);
 const CLOSE_UNAUTHORIZED = 4001;
 
-export function meetingWsUrl(code: string, accessToken: string): string {
+export function meetingWsUrl(code: string, accessToken: string, password?: string): string {
   const base = (process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8001").replace(/\/+$/, "");
-  return `${base}/api/v1/ws/meetings/${encodeURIComponent(code)}?token=${encodeURIComponent(accessToken)}`;
+  const url = new URL(
+    `${base}/api/v1/ws/meetings/${encodeURIComponent(code)}`,
+  );
+  url.searchParams.append("token", accessToken);
+  if (password) url.searchParams.append("password", password);
+  return url.toString();
 }
 
 /** Random id used for frame ids and client-side idempotency keys. */
@@ -64,6 +69,7 @@ type FrameHandler = (payload: unknown, frame: WsEnvelope) => void;
 export class MeetingSocket {
   private readonly code: string;
   private readonly getToken: () => string | null;
+  private readonly getPassword: () => string | undefined;
   private ws: WebSocket | null = null;
   private status: WsStatus = "closed";
   private shouldRun = false;
@@ -76,9 +82,10 @@ export class MeetingSocket {
   private readonly handlers = new Map<string, Set<FrameHandler>>();
   private readonly statusHandlers = new Set<(status: WsStatus) => void>();
 
-  constructor(code: string, getToken: () => string | null) {
+  constructor(code: string, getToken: () => string | null, getPassword?: () => string | undefined) {
     this.code = code;
     this.getToken = getToken;
+    this.getPassword = getPassword ?? (() => undefined);
   }
 
   getStatus(): WsStatus {
@@ -169,7 +176,7 @@ export class MeetingSocket {
 
     let ws: WebSocket;
     try {
-      ws = new WebSocket(meetingWsUrl(this.code, token));
+      ws = new WebSocket(meetingWsUrl(this.code, token, this.getPassword()));
     } catch {
       this.scheduleReconnect();
       return;

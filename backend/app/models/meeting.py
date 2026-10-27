@@ -32,6 +32,10 @@ class Meeting(Base):
     allow_chat: Mapped[bool] = mapped_column(nullable=False, default=True)
     allow_reactions: Mapped[bool] = mapped_column(nullable=False, default=True)
     allow_screen_share: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # Phase 13: optional Argon2id join password (never returned to clients -
+    # exposure is the `has_password` flag on the API schema).
+    password_hash: Mapped[str | None] = mapped_column(String(200))
+    waiting_room: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

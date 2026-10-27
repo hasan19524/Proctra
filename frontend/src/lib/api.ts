@@ -188,6 +188,8 @@ export interface Meeting {
   host_id: string;
   status: "waiting" | "live" | "ended";
   is_locked: boolean;
+  waiting_room: boolean;
+  has_password: boolean;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
@@ -199,11 +201,25 @@ export interface LiveKitCredentials {
   token: string;
 }
 
+export interface CreateMeetingOptions {
+  title?: string;
+  password?: string;
+  waitingRoom?: boolean;
+}
+
 export const meetingsApi = {
-  async create(title?: string): Promise<Meeting> {
+  async create(titleOrOptions?: string | CreateMeetingOptions): Promise<Meeting> {
+    let body: Record<string, unknown> = {};
+    if (typeof titleOrOptions === "string") {
+      if (titleOrOptions) body = { title: titleOrOptions };
+    } else if (titleOrOptions) {
+      if (titleOrOptions.title) body.title = titleOrOptions.title;
+      if (titleOrOptions.password) body.password = titleOrOptions.password;
+      if (titleOrOptions.waitingRoom) body.waiting_room = true;
+    }
     return apiFetch<Meeting>("/api/v1/meetings", {
       method: "POST",
-      body: title ? { title } : {},
+      body,
     });
   },
 
@@ -211,11 +227,11 @@ export const meetingsApi = {
     return apiFetch<Meeting>(`/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}`);
   },
 
-  /** Mint SFU join credentials (server enforces lock/end before issuing). */
-  async getToken(code: string): Promise<LiveKitCredentials> {
+  /** Mint SFU join credentials (server enforces lock/end/password/waiting before issuing). */
+  async getToken(code: string, password?: string): Promise<LiveKitCredentials> {
     return apiFetch<LiveKitCredentials>(
       `/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}/token`,
-      { method: "POST" },
+      { method: "POST", body: password ? { password } : {} },
     );
   },
 };

@@ -58,6 +58,9 @@ interface InCallViewProps {
   reactions: WsReaction[];
   mediaTiles?: MediaTile[];
   speakingIds?: string[];
+  pendingJoins?: Array<{ user_id: string; name: string }>;
+  onApproveJoin?: (userId: string) => void;
+  onRejectJoin?: (userId: string) => void;
   onSendChat: (body: string) => string | null;
   onSendNote: (visibility: NoteVisibility, text: string) => string | null;
   onSendReaction: (label: string) => string | null;
@@ -106,6 +109,9 @@ export function InCallView({
   reactions,
   mediaTiles = [],
   speakingIds = [],
+  pendingJoins = [],
+  onApproveJoin,
+  onRejectJoin,
   onSendChat,
   onSendNote,
   onSendReaction,
@@ -413,6 +419,9 @@ export function InCallView({
             <PeoplePanel
               participants={panelParticipants}
               canManage={isSelfHost}
+              pendingJoins={pendingJoins}
+              onApproveJoin={onApproveJoin}
+              onRejectJoin={onRejectJoin}
               onMute={(id) => onHostAction("mute_participant", { target_id: id })}
               onRemove={(id) => onHostAction("remove", { target_id: id })}
               onAddPeople={() => demo("Invite people (demo)")}

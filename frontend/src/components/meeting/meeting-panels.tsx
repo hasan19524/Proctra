@@ -146,6 +146,9 @@ function ParticipantRow({
 function PeoplePanel({
   participants,
   canManage = false,
+  pendingJoins = [],
+  onApproveJoin,
+  onRejectJoin,
   onMute,
   onRemove,
   onAddPeople,
@@ -154,6 +157,9 @@ function PeoplePanel({
 }: {
   participants: PanelParticipant[];
   canManage?: boolean;
+  pendingJoins?: Array<{ user_id: string; name: string }>;
+  onApproveJoin?: (id: string) => void;
+  onRejectJoin?: (id: string) => void;
   onMute?: (id: string) => void;
   onRemove?: (id: string) => void;
   onAddPeople?: () => void;
@@ -193,6 +199,44 @@ function PeoplePanel({
       </PanelHeader>
 
       <div className="flex flex-col gap-2">
+        {canManage && pendingJoins.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-muted-foreground px-1 text-xs font-medium tracking-wide uppercase">
+              Waiting ({pendingJoins.length})
+            </p>
+            <div className="rounded-lg border">
+              <ul className="flex flex-col">
+                {pendingJoins.map((pending) => (
+                  <li
+                    key={pending.user_id}
+                    className="flex items-center gap-3 border-b px-3 py-2 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{pending.name || "Guest"}</p>
+                      <p className="text-muted-foreground text-xs">Waiting to join</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onApproveJoin?.(pending.user_id)}
+                      >
+                        Admit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRejectJoin?.(pending.user_id)}
+                      >
+                        Deny
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : null}
         <p className="text-muted-foreground px-1 text-xs font-medium tracking-wide uppercase">
           In this meet
         </p>

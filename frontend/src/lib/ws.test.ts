@@ -66,7 +66,7 @@ async function flushAsync() {
 describe("meetingWsUrl", () => {
   it("builds the backend ws endpoint with code and token", () => {
     expect(meetingWsUrl("abc-def-ghi", "tok en")).toBe(
-      "ws://localhost:8001/api/v1/ws/meetings/abc-def-ghi?token=tok%20en",
+      "ws://localhost:8001/api/v1/ws/meetings/abc-def-ghi?token=tok+en",
     );
   });
 

@@ -475,3 +475,42 @@ no way for a host to end a meeting from the UI.
 **Consequences.** The call shell now behaves like the product the spec
 describes with no dead controls left behind; every placeholder removed here
 was a UI-only stub, so no backend contract changed in this phase.
+
+---
+
+## D22 - Failures are bounded and recoverable, never silent
+
+**Status:** Accepted (2026-10-27, Phase 12)
+
+**Context.** The reconnect matrix in REALTIME.md 3 promised behavior the
+code did not fully deliver: the WS side already did backoff + `last_seq`
+replay (D14), but the LiveKit side minted one token at mount and, if the
+first handshake failed or the session died later, dropped straight to a
+permanent "media unavailable" - even though a fresh 10-minute token costs
+one HTTP round trip.
+
+**Decision.**
+- The LiveKit hook now has exactly two recovery bounds: the initial
+  handshake retries once with a freshly minted token, and a session that
+  existed gets exactly one re-mint + reconnect after LiveKit gives up.
+  A second death is terminal (chat-only, warning toast). No retry loops,
+  no retry storms.
+- Every attempt builds its own `Room`; a socket poisoned by a failed
+  handshake is detached and discarded rather than reused. Handler wiring
+  is tracked per-Room so cleanup detaches every generation, not just the
+  last one.
+- The recovery state machine is explicit in the status field the UI
+  already renders: `connecting -> connected -> reconnecting -> connected`
+  or `... -> failed`. Before a session exists, connection-state noise from
+  a failed attempt is ignored - the handshake loop alone reports failure,
+  so a transient blip never flashes a false "failed" at the user.
+- Server side the matrix was already true, so Phase 12 proves it with
+  tests instead of new code: idle sockets close 4013 and may rejoin
+  immediately; an abrupt drop releases presence and attendance
+  (`left_at`), and the rejoin gets a snapshot whose tail still holds the
+  messages sent before the drop.
+
+**Consequences.** Every failure mode in the product now ends in a defined
+state - recovered, or visibly failed with chat still working - and the
+bounded-retry contract is pinned by tests on both sides, so future phases
+cannot silently regress it.

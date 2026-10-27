@@ -113,7 +113,7 @@ boundary.
 | 9 — LiveKit real audio/video | ✅ done |
 | 10 — Screen sharing | ✅ done |
 | 11 — Complete meeting experience | ✅ done |
-| 12 — Failure + reconnection | ⬜ |
+| 12 — Failure + reconnection | ✅ done |
 | 13 — Security hardening | ⬜ |
 | 14 — History + polish | ⬜ |
 | 15 — Full E2E validation | ⬜ |

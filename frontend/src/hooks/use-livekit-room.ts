@@ -36,6 +36,7 @@ const ROOM_EVENTS = [
   RoomEvent.LocalTrackPublished,
   RoomEvent.LocalTrackUnpublished,
   RoomEvent.LocalTrackSubscribed,
+  RoomEvent.ActiveSpeakersChanged,
 ] as const;
 
 function readTiles(room: Room): MediaTile[] {
@@ -66,6 +67,7 @@ function readTiles(room: Room): MediaTile[] {
 export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) {
   const [status, setStatus] = React.useState<MediaStatus>("idle");
   const [tiles, setTiles] = React.useState<MediaTile[]>([]);
+  const [speakingIds, setSpeakingIds] = React.useState<string[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const roomRef = React.useRef<Room | null>(null);
   const desiredRef = React.useRef({ micOn, cameraOn });
@@ -80,7 +82,9 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
     const detach: Array<[RoomEvent, () => void]> = [];
 
     const refresh = () => {
-      if (room) setTiles(readTiles(room));
+      if (!room) return;
+      setTiles(readTiles(room));
+      setSpeakingIds(room.activeSpeakers.map((participant) => participant.identity));
     };
     const onState = () => {
       if (!room || cancelled) return;
@@ -117,6 +121,7 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
         if (cancelled) return;
         setStatus("connected");
         setTiles(readTiles(room));
+        setSpeakingIds(room.activeSpeakers.map((participant) => participant.identity));
       } catch (err) {
         if (cancelled) return;
         setStatus("failed");
@@ -132,6 +137,7 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
         room.disconnect();
       }
       setTiles([]);
+      setSpeakingIds([]);
     };
   }, [code]);
 
@@ -165,5 +171,5 @@ export function useLiveKitRoom(code: string, micOn: boolean, cameraOn: boolean) 
     }
   }, []);
 
-  return { status, tiles, error, screenShareOn, toggleScreenShare };
+  return { status, tiles, speakingIds, error, screenShareOn, toggleScreenShare };
 }

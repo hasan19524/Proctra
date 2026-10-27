@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { Track } from "livekit-client";
 
 import { FloatingReactions, InCallView } from "@/components/meeting/in-call-view";
@@ -125,7 +125,103 @@ describe("InCallView", () => {
     expect(screen.getByText("Hasan (You)")).toBeTruthy();
     expect(screen.getByText("Sharing screen")).toBeTruthy();
   });
+
+  it("opens meeting details with the real title and code", async () => {
+    renderView({
+      meeting: {
+        code: "ktq-vxm-pnz",
+        title: "Design sync",
+        status: "live",
+        is_locked: false,
+        allow_chat: true,
+        allow_reactions: true,
+        allow_screen_share: true,
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Meeting details" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Design sync")).toBeTruthy();
+    expect(within(dialog).getByText("ktq-vxm-pnz")).toBeTruthy();
+  });
+
+  it("wires the M shortcut to the mic toggle but ignores typing", () => {
+    const onToggleMic = vi.fn();
+    renderView({ onToggleMic });
+
+    fireEvent.keyDown(window, { key: "m" });
+    expect(onToggleMic).toHaveBeenCalledTimes(1);
+
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    fireEvent.keyDown(textarea, { key: "m" });
+    expect(onToggleMic).toHaveBeenCalledTimes(1);
+    textarea.remove();
+  });
+
+  it("pins a participant to the stage and moves your camera to the strip", () => {
+    renderView({ participants: phase11Roster(), selfUserId: "u1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin Amina Yusuf" }));
+
+    expect(screen.getByRole("button", { name: "Unpin Amina Yusuf" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Pin Amina Yusuf" })).toBeNull();
+    expect(screen.getByText("Hasan (You)")).toBeTruthy();
+  });
+
+  it("marks the active speaker on their tile", () => {
+    renderView({ participants: phase11Roster(), selfUserId: "u1", speakingIds: ["u2"] });
+
+    const tile = screen.getByText("Amina Yusuf").closest("[data-speaking]");
+    expect(tile?.getAttribute("data-speaking")).toBe("true");
+  });
+
+  it("lets the host end the meeting after confirming", async () => {
+    const onHostAction = vi.fn();
+    renderView({
+      participants: phase11Roster(),
+      selfUserId: "u1",
+      onHostAction,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "End the meet for everyone" }));
+    fireEvent.click(await screen.findByRole("button", { name: "End meeting" }));
+
+    expect(onHostAction).toHaveBeenCalledWith("end");
+  });
+
+  it("hides end meeting from non-hosts", async () => {
+    renderView({ participants: phase11Roster(false), selfUserId: "u1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: "End the meet for everyone" })).toBeNull();
+  });
 });
+
+function phase11Roster(selfIsHost = true): WsParticipant[] {
+  return [
+    {
+      user_id: "u1",
+      name: "Hasan",
+      is_host: selfIsHost,
+      mic_on: true,
+      camera_on: true,
+      hand_raised: false,
+      screen_share_on: false,
+    },
+    {
+      user_id: "u2",
+      name: "Amina Yusuf",
+      is_host: false,
+      mic_on: true,
+      camera_on: true,
+      hand_raised: false,
+      screen_share_on: false,
+    },
+  ];
+}
 
 describe("FloatingReactions", () => {
   it("hides when empty and renders every active reaction", () => {

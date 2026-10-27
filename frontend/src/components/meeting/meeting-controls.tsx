@@ -53,6 +53,8 @@ type MeetingControlsProps = {
   onToggleReactions: () => void;
   onLeave: () => void;
   onMoreAction?: (action: MoreAction) => void;
+  canEndMeeting?: boolean;
+  onEndMeeting?: () => void;
   isReactionsOpen?: boolean;
   isLeaving?: boolean;
   isBusy?: boolean;
@@ -137,6 +139,8 @@ function MeetingControls({
   onToggleReactions,
   onLeave,
   onMoreAction,
+  canEndMeeting = false,
+  onEndMeeting,
   isReactionsOpen = false,
   isLeaving = false,
   isBusy = false,
@@ -239,11 +243,15 @@ function MeetingControls({
             <StickyNoteIcon data-icon="inline-start" />
             Notes
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => onMoreAction?.("host-controls")}>
-            <LockIcon data-icon="inline-start" />
-            Host controls
-          </DropdownMenuItem>
+          {canEndMeeting ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onEndMeeting?.()}>
+                <PhoneOffIcon data-icon="inline-start" />
+                End the meet for everyone
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 

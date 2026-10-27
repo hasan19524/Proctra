@@ -106,6 +106,7 @@ function ParticipantTile({
                     variant="ghost"
                     size="icon-sm"
                     aria-label={isPinned ? `Unpin ${name}` : `Pin ${name}`}
+                    onClick={onPin}
                     className="bg-background/70 rounded-full backdrop-blur-sm"
                   />
                 }

@@ -23,14 +23,28 @@ const { FakeRoom } = vi.hoisted(() => {
   class FakeRoom {
     static instances: FakeRoom[] = [];
     state = "disconnected";
+    activeSpeakers: Array<{ identity: string }> = [];
+    handlers = new Map<string, Array<() => void>>();
     localParticipant = new FakeLocalParticipant();
     remoteParticipants = new Map<string, unknown>();
     connect = vi.fn(async () => {
       this.state = "connected";
     });
     disconnect = vi.fn(() => undefined);
-    on = vi.fn(() => undefined);
-    off = vi.fn(() => undefined);
+    on = vi.fn((event: string, handler: () => void) => {
+      const list = this.handlers.get(event) ?? [];
+      list.push(handler);
+      this.handlers.set(event, list);
+    });
+    off = vi.fn((event: string, handler: () => void) => {
+      const list = this.handlers.get(event) ?? [];
+      const index = list.indexOf(handler);
+      if (index >= 0) list.splice(index, 1);
+    });
+
+    emit(event: string) {
+      for (const handler of this.handlers.get(event) ?? []) handler();
+    }
 
     constructor() {
       FakeRoom.instances.push(this);
@@ -144,5 +158,18 @@ describe("useLiveKitRoom", () => {
     await act(async () => {
       expect(await result.current.toggleScreenShare()).toBeNull();
     });
+  });
+
+  it("tracks active speakers as identities", async () => {
+    const { result } = renderHook(() => useLiveKitRoom("ktq-vxm-pnz", true, true));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(result.current.speakingIds).toEqual([]);
+
+    const { RoomEvent } = await import("livekit-client");
+    const room = FakeRoom.last();
+    room.activeSpeakers = [{ identity: "u2" }];
+    act(() => room.emit(RoomEvent.ActiveSpeakersChanged));
+
+    await waitFor(() => expect(result.current.speakingIds).toEqual(["u2"]));
   });
 });

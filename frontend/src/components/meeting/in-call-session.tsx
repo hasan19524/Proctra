@@ -149,6 +149,7 @@ export function InCallSession({ code, displayName, micOn, cameraOn, onLeave }: I
       notes={notes}
       reactions={reactions}
       mediaTiles={media.tiles}
+      speakingIds={media.speakingIds}
       onSendChat={sendChat}
       onSendNote={(visibility, text) => sendNoteSave(visibility, { text })}
       onSendReaction={sendReaction}

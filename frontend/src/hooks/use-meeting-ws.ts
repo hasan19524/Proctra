@@ -27,6 +27,8 @@ export interface WsChatMessage {
 }
 
 export interface MeetingMeta {
+  code: string;
+  title: string;
   status: string;
   is_locked: boolean;
   allow_chat: boolean;

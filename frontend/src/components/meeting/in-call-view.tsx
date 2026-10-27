@@ -3,6 +3,24 @@
 import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useClock } from "@/hooks/use-clock";
 import type { MediaTile } from "@/hooks/use-livekit-room";
 import type {
@@ -39,6 +57,7 @@ interface InCallViewProps {
   notes: WsNote[];
   reactions: WsReaction[];
   mediaTiles?: MediaTile[];
+  speakingIds?: string[];
   onSendChat: (body: string) => string | null;
   onSendNote: (visibility: NoteVisibility, text: string) => string | null;
   onSendReaction: (label: string) => string | null;
@@ -86,6 +105,7 @@ export function InCallView({
   notes,
   reactions,
   mediaTiles = [],
+  speakingIds = [],
   onSendChat,
   onSendNote,
   onSendReaction,
@@ -106,6 +126,13 @@ export function InCallView({
 
   const [isReactionsOpen, setReactionsOpen] = React.useState(false);
   const [panel, setPanel] = React.useState<"people" | "chat" | "notes" | null>(null);
+  const [isDetailsOpen, setDetailsOpen] = React.useState(false);
+  const [isEndOpen, setEndOpen] = React.useState(false);
+  const [pinnedId, setPinnedId] = React.useState<string | null>(null);
+
+  const togglePanel = React.useCallback((next: "people" | "chat" | "notes") => {
+    setPanel((current) => (current === next ? null : next));
+  }, []);
 
   const isLocked = meeting?.is_locked ?? false;
   const allowChat = meeting?.allow_chat ?? true;
@@ -146,14 +173,78 @@ export function InCallView({
     participants.find((participant) => participant.user_id === shareTile?.id)?.name ??
     shareTile?.name ??
     "";
+  const speakingSet = React.useMemo(() => new Set(speakingIds), [speakingIds]);
 
-  // While someone presents, the main stage shows their screen and the strip
-  // keeps every camera — including yours.
-  const stripParticipants = shareTile && self ? [self, ...others] : others;
+  // A pinned participant leaves → the pin dies with them (render-phase
+  // derivation, no effect needed).
+  const pinnedParticipant = pinnedId
+    ? (participants.find((participant) => participant.user_id === pinnedId) ?? null)
+    : null;
+  const pinnedOnStage = shareTile ? null : pinnedParticipant;
 
-  const togglePanel = React.useCallback((next: "people" | "chat" | "notes") => {
-    setPanel((current) => (current === next ? null : next));
-  }, []);
+  // Stage precedence: active screen share > pinned participant > yourself.
+  // While someone else holds the stage, your camera moves into the strip.
+  const stripCandidates: WsParticipant[] =
+    shareTile || pinnedOnStage ? [...(self ? [self] : []), ...others] : others;
+  const stripParticipants = pinnedOnStage
+    ? stripCandidates.filter((participant) => participant.user_id !== pinnedOnStage.user_id)
+    : stripCandidates;
+
+  // Keyboard shortcuts promised on the control labels (M/V/S/C/R); never
+  // fire while the user is typing into a field.
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
+      switch (event.key.toLowerCase()) {
+        case "m":
+          onToggleMic();
+          break;
+        case "v":
+          onToggleCamera();
+          break;
+        case "s":
+          if (!canScreenShare) {
+            toast.add({
+              type: "error",
+              title: "Screen sharing is turned off",
+              description: "The host turned off screen sharing for this meet.",
+            });
+            return;
+          }
+          onToggleScreenShare?.();
+          break;
+        case "c":
+          togglePanel("chat");
+          break;
+        case "r":
+          onToggleHand();
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canScreenShare, onToggleCamera, onToggleHand, onToggleMic, onToggleScreenShare, togglePanel]);
+
+  const meetingCode = meeting?.code ?? code;
+  const inviteUrl = `${typeof window === "undefined" ? "" : window.location.origin}/room/${meetingCode}`;
+  const copyText = async (text: string, doneTitle: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.add({ type: "success", title: doneTitle });
+    } catch {
+      toast.add({ type: "error", title: "Couldn't copy to the clipboard" });
+    }
+  };
 
   return (
     <div className="bg-background text-foreground relative flex h-svh flex-col">
@@ -167,7 +258,7 @@ export function InCallView({
         time={time}
         connection={toTopBarStatus(connection)}
         participantCount={participants.length}
-        onShowDetails={() => demo("Meeting details (demo)")}
+        onShowDetails={() => setDetailsOpen(true)}
         onOpenPeople={() => togglePanel("people")}
       />
 
@@ -183,6 +274,21 @@ export function InCallView({
                     : `${presenterName} is presenting`}
                 </span>
               </div>
+            ) : pinnedOnStage ? (
+              <ParticipantTile
+                name={pinnedOnStage.name}
+                isMuted={!pinnedOnStage.mic_on}
+                isCameraOff={!pinnedOnStage.camera_on}
+                isScreenSharing={pinnedOnStage.screen_share_on}
+                isHandRaised={pinnedOnStage.hand_raised}
+                isHost={pinnedOnStage.is_host}
+                isPinned
+                onPin={() => setPinnedId(null)}
+                isSpeaking={speakingSet.has(pinnedOnStage.user_id)}
+                connection="excellent"
+                media={videoFor(mediaTiles.find((tile) => tile.id === pinnedOnStage.user_id))}
+                className="h-full w-full"
+              />
             ) : (
               <ParticipantTile
                 name={`${self?.name ?? displayName} (You)`}
@@ -191,6 +297,7 @@ export function InCallView({
                 isScreenSharing={isScreenSharing}
                 isHandRaised={isHandRaised}
                 isHost={self?.is_host ?? true}
+                isSpeaking={selfUserId !== null && speakingSet.has(selfUserId)}
                 connection="excellent"
                 media={videoFor(localTile)}
                 className="h-full w-full"
@@ -217,6 +324,13 @@ export function InCallView({
                   }
                   isHandRaised={participant.hand_raised}
                   isHost={participant.is_host}
+                  isPinned={pinnedId === participant.user_id}
+                  onPin={
+                    participant.user_id === selfUserId
+                      ? undefined
+                      : () => setPinnedId(participant.user_id)
+                  }
+                  isSpeaking={speakingSet.has(participant.user_id)}
                   connection="excellent"
                   media={videoFor(mediaTiles.find((tile) => tile.id === participant.user_id))}
                   className="w-52"
@@ -287,6 +401,8 @@ export function InCallView({
                 }
                 demo(`${action} (demo)`);
               }}
+              canEndMeeting={isSelfHost}
+              onEndMeeting={() => setEndOpen(true)}
               onLeave={onLeave}
             />
           </footer>
@@ -378,6 +494,60 @@ export function InCallView({
           onHostAction(isLocked ? "unlock" : "lock");
         }}
       />
+
+      <Dialog open={isDetailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{meeting?.title || "Meeting details"}</DialogTitle>
+            <DialogDescription>Share the code or link so others can join.</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="bg-muted flex items-center justify-between gap-3 rounded-md px-3 py-2">
+              <span className="font-mono text-sm">{meetingCode}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyText(meetingCode, "Invite code copied")}
+              >
+                Copy code
+              </Button>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground truncate text-xs">{inviteUrl}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyText(inviteUrl, "Invite link copied")}
+              >
+                Copy link
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={isEndOpen} onOpenChange={setEndOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>End the meet for everyone?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Everyone will be disconnected and the meeting closed for good.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive-solid"
+              onClick={() => {
+                setEndOpen(false);
+                onHostAction("end");
+              }}
+            >
+              End meeting
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

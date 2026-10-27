@@ -439,3 +439,39 @@ transport.
 without LiveKit server-side webhooks; a declined OS prompt costs a toast, not
 a desync; and "who is presenting" survives reconnects because it lives in the
 presence snapshot.
+
+---
+
+## D21 - Meeting experience layer: shortcuts, speaker rings, pinning, ending
+
+**Status:** Accepted (2026-10-27, Phase 11)
+
+**Context.** The core product (media, chat, notes, controls) worked, but the
+call shell still carried Phase 1 placeholders: shortcut labels with no
+handlers, a pin button with no onClick, a "Meeting details (demo)" toast, and
+no way for a host to end a meeting from the UI.
+
+**Decision.**
+- Shortcuts (M/V/S/C/R) are owned by `InCallView` - it already holds the
+  handlers and the chat panel state. The listener ignores events while the
+  target is an input/textarea/contenteditable, so typing in chat never
+  triggers them, and the S key routes through the same
+  `canScreenShare` gate as the button (one toast, one truth).
+- Speaker rings come from LiveKit `ActiveSpeakersChanged` (identities only -
+  `speakingIds`), projected onto roster tiles by user id per D19's dual-roster
+  rule. Presence stays authoritative for flags; the SFU is authoritative for
+  "whose mic is hot right now".
+- Pinning is view-local state (`pinnedId`) with render-phase derivation: a
+  pin dies when its participant leaves, no effect needed. Stage precedence is
+  share > pinned > self; whoever is off-stage moves into the strip, so no
+  camera ever disappears.
+- Ending a meeting is host-only (menu item hidden otherwise) and always
+  double-checked with an AlertDialog before `host.action end` goes out -
+  it is the one irreversible action in the product.
+- The details dialog shows real data (title, code, invite URL copied via the
+  clipboard API) instead of the demo toast; clipboard failure toasts an
+  error rather than failing silently.
+
+**Consequences.** The call shell now behaves like the product the spec
+describes with no dead controls left behind; every placeholder removed here
+was a UI-only stub, so no backend contract changed in this phase.

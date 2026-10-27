@@ -47,3 +47,13 @@ async def rate_limit_login(request: Request) -> None:
 async def rate_limit_register(request: Request) -> None:
     """Sliding-window rate limit on registration (per IP)."""
     await rate_limit("register", request.client.host if request.client else "unknown", 5, 60)
+
+
+async def rate_limit_refresh(request: Request) -> None:
+    """Sliding-window rate limit on refresh rotation (per IP)."""
+    await rate_limit("refresh", request.client.host if request.client else "unknown", 30, 60)
+
+
+async def rate_limit_logout(request: Request) -> None:
+    """Sliding-window rate limit on logout (per IP)."""
+    await rate_limit("logout", request.client.host if request.client else "unknown", 30, 60)

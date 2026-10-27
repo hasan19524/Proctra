@@ -32,7 +32,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains; preload"
             )
-        if not settings.is_production:
+        # A CSP ships in BOTH environments; production gets a strict policy,
+        # development relaxes script/style sources so tooling keeps working.
+        if settings.is_production:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; "
+                "font-src 'self' data:; "
+                "connect-src 'self' ws: wss:; "
+                "media-src 'self' blob:; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'"
+            )
+        else:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
@@ -50,6 +65,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     yield
+    # Close the shared LiveKit SFU client (aiohttp session) on shutdown.
+    from app.services.sfu_service import shutdown as sfu_shutdown
+
+    await sfu_shutdown()
 
 
 def create_app() -> FastAPI:
@@ -63,7 +82,9 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    if settings.is_production and getattr(settings, "trusted_hosts", None):
+    # Only mount TrustedHostMiddleware with explicit, non-wildcard hosts —
+    # `["*"]` would silently disable it.
+    if settings.is_production and settings.trusted_hosts and "*" not in settings.trusted_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
     app.add_middleware(SecurityHeadersMiddleware)
@@ -73,8 +94,8 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.backend_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_headers=["authorization", "content-type"],
         expose_headers=["X-Request-ID"],
     )
 

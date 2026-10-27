@@ -29,6 +29,10 @@ _INVALID_CREDENTIALS = HTTPException(
     detail="Invalid email or password",
 )
 
+# Computed once at import so the unknown-email login path does the same Argon2id
+# work as a real verify (closes the ~60 ms timing oracle for account existence).
+_DUMMY_PASSWORD_HASH = hash_password("timing-equalizer-not-a-real-password")
+
 
 class AuthError(Exception):
     """Domain-level auth failure with an HTTP status."""
@@ -89,6 +93,9 @@ async def login(session: AsyncSession, email: str, password: str) -> tuple[AuthR
     """Verify credentials and establish a session."""
     user = await session.scalar(select(User).where(User.email == email))
     if user is None or not user.is_active:
+        # Burn the same Argon2id cost as a real verify so response time does
+        # not reveal whether the account exists.
+        verify_password(password, _DUMMY_PASSWORD_HASH)
         raise _INVALID_CREDENTIALS  # uniform: unknown email == wrong password
     if not verify_password(password, user.password_hash):
         raise _INVALID_CREDENTIALS
@@ -105,35 +112,50 @@ async def refresh_session(session: AsyncSession, presented: str) -> tuple[AuthRe
     - Known but revoked -> reuse detected: revoke every session for that user.
     - Expired -> 401 and revoke.
     - Valid -> revoke old row, issue new pair.
+
+    The revoke is an atomic compare-and-swap (``UPDATE ... WHERE revoked_at IS
+    NULL ... RETURNING``) so two concurrent requests carrying the same token
+    cannot both rotate it into two live sessions.
     """
     token_hash = hash_refresh_token(presented)
-    row = await session.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    now = datetime.now(UTC)
 
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
-
-    if row.revoked_at is not None:
-        # Reuse detection: a revoked token was presented — kill the whole family.
-        # Commit immediately: the caller rolls back on 401, which must NOT undo
-        # the family revocation.
+    claimed = (
         await session.execute(
             update(RefreshToken)
-            .where(RefreshToken.user_id == row.user_id, RefreshToken.revoked_at.is_(None))
-            .values(revoked_at=datetime.now(UTC))
+            .where(RefreshToken.token_hash == token_hash, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+            .returning(RefreshToken.user_id, RefreshToken.expires_at)
+        )
+    ).first()
+
+    if claimed is None:
+        # Unknown or already consumed. Distinguish so replay triggers reuse
+        # detection (which must survive the caller's rollback — commit here).
+        existing = await session.scalar(
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        )
+        if existing is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == existing.user_id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=now)
         )
         await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
-    if row.expires_at <= datetime.now(UTC):
-        row.revoked_at = datetime.now(UTC)
-        await session.commit()
+    user_id, expires_at = claimed
+
+    if expires_at <= now:
+        await session.commit()  # persist the revocation before the caller rolls back
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 
-    user = await session.get(User, row.user_id)
+    user = await session.get(User, user_id)
     if user is None or not user.is_active:
+        await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
-    row.revoked_at = datetime.now(UTC)
     refresh = await _issue_refresh(session, user.id)
     access = create_access_token(user.id, user.email)
     return _auth_response(user, access), refresh

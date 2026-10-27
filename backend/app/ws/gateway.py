@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -25,6 +26,7 @@ from app.models.meeting import Meeting
 from app.models.message import MAX_BODY_LENGTH
 from app.models.note import MAX_NOTE_CONTENT_CHARS, VISIBILITIES, VISIBILITY_HOST_ONLY
 from app.models.user import User
+from app.services import sfu_service
 from app.services.audit_service import audit
 from app.services.auth_service import get_user_from_token
 from app.services.meeting_service import (
@@ -69,6 +71,13 @@ REPLAY_LIMIT = 500
 # Join budget per (user, meeting) per minute: bounds meeting-password guessing
 # (SECURITY.md §4) while leaving plenty for reconnect churn.
 JOIN_RATE = (15, 60)
+# Pre-auth handshake budget per IP: bounds token brute-force / connection floods
+# before any DB or Argon2 work happens.
+HANDSHAKE_RATE = (30, 60)
+# Per-connection inbound frame budget (sustained frames/sec, burst). Bounds
+# chat/reaction/sync amplification from a single socket.
+FLOOD_RATE_PER_SECOND = 8.0
+FLOOD_BURST = 40.0
 # Frames a queued (waiting-room) connection may see: nothing about meeting
 # content leaks before the host admits them (SECURITY.md §6).
 WAITING_VISIBLE_FRAMES = frozenset(
@@ -82,6 +91,27 @@ REACTION_LABELS = frozenset(
 
 class _Kicked(Exception):
     """The connection was kicked by a host action (remove/end)."""
+
+
+class _TokenBucket:
+    """Simple monotonic token bucket for per-connection flood control."""
+
+    __slots__ = ("_burst", "_last", "_rate", "_tokens")
+
+    def __init__(self, rate: float, burst: float) -> None:
+        self._rate = rate
+        self._burst = burst
+        self._tokens = burst
+        self._last = time.monotonic()
+
+    def allow(self) -> bool:
+        now = time.monotonic()
+        self._tokens = min(self._burst, self._tokens + (now - self._last) * self._rate)
+        self._last = now
+        if self._tokens >= 1.0:
+            self._tokens -= 1.0
+            return True
+        return False
 
 
 def _channel(meeting_code: str) -> str:
@@ -440,6 +470,8 @@ async def _handle_host_action(
                 await audit(session, meeting_id=fresh.id, actor_id=user.id, action="end")
                 await session.commit()
             meeting.status = "ended"
+            # Evict everyone at the SFU too — otherwise LiveKit keeps streaming.
+            sfu_service.spawn_close_room(meeting_code)
             local = list(registry.in_meeting(meeting_code))
             # Direct send first: terminal frames must not race the close.
             for target in local:
@@ -498,6 +530,8 @@ async def _handle_host_action(
                 target_id=_parse_uuid(target_id),
             )
             await session.commit()
+            # Evict from the SFU so the removed user stops publishing media too.
+            sfu_service.spawn_remove_participant(meeting_code, target_id)
             for target in targets:
                 await _send(
                     target.websocket,
@@ -618,7 +652,7 @@ async def ws_meeting(
     websocket: WebSocket,
     meeting_code: str,
     token: str | None = Query(default=None),
-    password: str | None = Query(default=None),
+    password: str | None = Query(default=None, max_length=64),
 ) -> None:
     """Authenticated app-WS endpoint for one meeting (REALTIME.md §1)."""
     code = normalize_code(meeting_code)
@@ -628,6 +662,18 @@ async def ws_meeting(
     origin = websocket.headers.get("origin")
     if origin and origin not in settings.backend_cors_origins and origin != settings.frontend_url:
         await _reject(websocket, CLOSE_PROTOCOL_ERROR, "origin_not_allowed", "Origin not allowed")
+        return
+
+    # 0.5 Pre-auth handshake budget per IP: bounds token brute-force and
+    #     connection floods before any DB or Argon2 work happens.
+    try:
+        await rate_limit(
+            "ws_handshake",
+            websocket.client.host if websocket.client else "unknown",
+            *HANDSHAKE_RATE,
+        )
+    except HTTPException:
+        await _reject(websocket, CLOSE_PROTOCOL_ERROR, "rate_limited", "Too many connections")
         return
 
     # 1. Authenticate the upgrade (access token as query param).
@@ -685,9 +731,16 @@ async def ws_meeting(
             return
         awaiting = decision != APPROVED
 
+    # 5.5 Connection cap: one user may hold only a few sockets per meeting.
+    registry = get_registry()
+    if registry.at_capacity(code, str(user.id)):
+        await _reject(
+            websocket, CLOSE_FORBIDDEN, "too_many_connections", "Too many open connections"
+        )
+        return
+
     await websocket.accept()
 
-    registry = get_registry()
     conn = registry.add(code, str(user.id), websocket, is_host=is_host)
     conn.waiting = awaiting
 
@@ -851,6 +904,7 @@ async def _serve(
     conn: "LocalConnection",
 ) -> None:
     """Receive loop: parse envelopes, dispatch, keep the connection honest."""
+    bucket = _TokenBucket(FLOOD_RATE_PER_SECOND, FLOOD_BURST)
     while True:
         try:
             raw = await _receive_frame(websocket, conn)
@@ -861,6 +915,11 @@ async def _serve(
             return
         except (WebSocketDisconnect, RuntimeError):
             return
+
+        # Flood control: bound frames/sec from this socket before any work.
+        if not bucket.allow():
+            await _send_ws_error(websocket, "rate_limited", "Slow down", retryable=True)
+            continue
 
         try:
             frame = parse_client_frame(raw)

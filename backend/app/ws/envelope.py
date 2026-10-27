@@ -12,6 +12,10 @@ from typing import Any
 
 PROTOCOL_VERSION = 1
 
+# Hard cap on one client frame's UTF-8 size. Notes cap at ~100 KB of JSON, so
+# this leaves headroom while bounding a single oversized payload (DoS guard).
+MAX_FRAME_BYTES = 256 * 1024
+
 # Application close codes (4000-4999 range, machine-readable).
 CLOSE_UNAUTHORIZED = 4001
 CLOSE_FORBIDDEN = 4003
@@ -64,6 +68,9 @@ def parse_client_frame(raw: str) -> ClientFrame:
     Raises ``ProtocolError`` with a machine-readable code on any malformed
     input so the gateway can answer with an ``error`` frame instead of dying.
     """
+    if len(raw.encode("utf-8", "ignore")) > MAX_FRAME_BYTES:
+        raise ProtocolError("frame_too_large", "Frame exceeds size limit")
+
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:

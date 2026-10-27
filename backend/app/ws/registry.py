@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from starlette.websockets import WebSocket
 
+# Max concurrent sockets one user may hold in a single meeting on this worker.
+# Bounds the authenticated-connection DoS (each socket holds a Redis pubsub
+# subscription, a presence refcount, and an attendance row).
+MAX_CONNS_PER_USER_IN_MEETING = 3
+
 
 @dataclass(slots=True)
 class LocalConnection:
@@ -73,6 +78,10 @@ class ConnectionRegistry:
     def get(self, conn_id: str) -> LocalConnection | None:
         """Look up one local connection by id."""
         return self._by_conn.get(conn_id)
+
+    def at_capacity(self, meeting_code: str, user_id: str) -> bool:
+        """True when the user already holds the max sockets in this meeting."""
+        return self._user_counts.get((meeting_code, user_id), 0) >= MAX_CONNS_PER_USER_IN_MEETING
 
     def in_meeting(self, meeting_code: str) -> list[LocalConnection]:
         """All live local connections for a meeting."""

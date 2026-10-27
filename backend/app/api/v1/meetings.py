@@ -57,6 +57,7 @@ async def create_meeting(
     session: AsyncSession = Depends(get_session),
 ) -> MeetingOut:
     """Start a new meeting hosted by the current user."""
+    await rate_limit("meeting_create", str(user.id), 20, 60)
     meeting = await meeting_service.create_meeting(
         session,
         user.id,
@@ -71,10 +72,12 @@ async def create_meeting(
 @router.get("/{code}", response_model=MeetingOut)
 async def get_meeting(
     code: str,
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> MeetingOut:
     """Look up a meeting by join code (used by the pre-join lobby)."""
+    # Bounds code enumeration: a single account cannot spray many codes.
+    await rate_limit("meeting_lookup", str(user.id), 60, 60)
     try:
         meeting = await meeting_service.get_meeting_by_code(session, code)
     except MeetingNotFoundError as exc:

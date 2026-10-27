@@ -9,7 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.deps import get_current_user, rate_limit_login, rate_limit_register
+from app.core.deps import (
+    get_current_user,
+    rate_limit_login,
+    rate_limit_logout,
+    rate_limit_refresh,
+    rate_limit_register,
+)
 from app.db import get_session
 from app.models.user import User
 from app.schemas.auth import (
@@ -37,7 +43,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         path=REFRESH_COOKIE_PATH,
         httponly=True,
         samesite="lax",
-        secure=settings.is_production,
+        secure=settings.refresh_cookie_secure,
     )
 
 
@@ -47,7 +53,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         path=REFRESH_COOKIE_PATH,
         httponly=True,
         samesite="lax",
-        secure=settings.is_production,
+        secure=settings.refresh_cookie_secure,
     )
 
 
@@ -99,6 +105,7 @@ async def refresh(
     request: Request,
     response: Response,
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(rate_limit_refresh),
 ) -> AuthResponse:
     """Rotate the refresh token and mint a fresh access token."""
     presented = _refresh_token_from_request(request)
@@ -120,6 +127,7 @@ async def logout(
     request: Request,
     response: Response,
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(rate_limit_logout),
 ) -> MessageResponse:
     """Revoke the current session (idempotent, works with or without auth)."""
     await auth_service.logout(session, _refresh_token_from_request(request))

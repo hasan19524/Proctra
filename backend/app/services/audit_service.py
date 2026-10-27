@@ -24,10 +24,14 @@ async def audit(
     target_id: uuid.UUID | None = None,
     detail: dict[str, Any] | None = None,
 ) -> None:
-    """Record one security-relevant action; unknown actions are a bug (logged)."""
+    """Record one security-relevant action; unknown actions are logged loudly.
+
+    Actions are developer-hardcoded strings, so an unknown value is a bug — but
+    dropping the row would leave the audit trail silently incomplete. Record it
+    anyway and shout, so a missing action name is never a quiet gap.
+    """
     if action not in AUDIT_ACTIONS:
-        logger.warning("unaudited action attempted: %s", action)
-        return
+        logger.error("audit action %r is not in AUDIT_ACTIONS — recording anyway", action)
     session.add(
         AuditLog(
             meeting_id=meeting_id,

@@ -10,7 +10,7 @@ class CreateMeetingRequest(BaseModel):
     """Optional title and join guards when starting a meet (Phase 13)."""
 
     title: str | None = Field(default=None, max_length=120)
-    password: str | None = Field(default=None, min_length=4, max_length=64)
+    password: str | None = Field(default=None, min_length=8, max_length=64)
     waiting_room: bool = False
 
 

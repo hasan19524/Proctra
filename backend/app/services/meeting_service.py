@@ -76,7 +76,9 @@ async def get_meeting_by_code(session: AsyncSession, code: str) -> Meeting:
     return meeting
 
 
-async def list_user_meetings(session: AsyncSession, user_id: UUID) -> list[Meeting]:
+async def list_user_meetings(
+    session: AsyncSession, user_id: UUID, limit: int = 20
+) -> list[Meeting]:
     """List meetings the user hosted or participated in (Phase 14)."""
     from app.models.participant import MeetingParticipant
 
@@ -90,6 +92,7 @@ async def list_user_meetings(session: AsyncSession, user_id: UUID) -> list[Meeti
         .where((Meeting.host_id == user_id) | (MeetingParticipant.user_id == user_id))
         .distinct()
         .order_by(Meeting.created_at.desc())
+        .limit(limit)
     )
     result = await session.scalars(stmt)
     return list(result.all())

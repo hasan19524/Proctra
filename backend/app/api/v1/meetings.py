@@ -44,9 +44,12 @@ def _meeting_out(meeting: Meeting) -> MeetingOut:
 async def get_meeting_history(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    limit: int = 20,
 ) -> list[MeetingHistoryOut]:
     """List meetings the current user hosted or joined (Phase 14)."""
-    meetings = await meeting_service.list_user_meetings(session, user.id)
+    if limit < 1 or limit > 50:
+        limit = 20
+    meetings = await meeting_service.list_user_meetings(session, user.id, limit=limit)
     return [MeetingHistoryOut.model_validate(m) for m in meetings]
 
 

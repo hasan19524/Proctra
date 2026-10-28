@@ -207,6 +207,19 @@ export interface CreateMeetingOptions {
   waitingRoom?: boolean;
 }
 
+/** One row from the user's meeting history (Phase 14). */
+export interface MeetingHistoryItem {
+  id: string;
+  code: string;
+  title: string | null;
+  host_id: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  joined_at: string | null;
+}
+
 export const meetingsApi = {
   async create(titleOrOptions?: string | CreateMeetingOptions): Promise<Meeting> {
     let body: Record<string, unknown> = {};
@@ -225,6 +238,13 @@ export const meetingsApi = {
 
   async get(code: string): Promise<Meeting> {
     return apiFetch<Meeting>(`/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}`);
+  },
+
+  /** Recent meetings for the current user (newest first). */
+  async history(limit = 8): Promise<MeetingHistoryItem[]> {
+    return apiFetch<MeetingHistoryItem[]>(
+      `/api/v1/meetings/history?limit=${encodeURIComponent(String(limit))}`,
+    );
   },
 
   /** Mint SFU join credentials (server enforces lock/end/password/waiting before issuing). */

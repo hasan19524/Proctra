@@ -29,7 +29,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { extractMeetingCode, meetingsApi } from "@/lib/api";
+import { extractMeetingCode, meetingsApi, type MeetingHistoryItem } from "@/lib/api";
 import { cn } from "cn";
 
 const NAV_ITEMS = [
@@ -50,7 +50,23 @@ export default function Home() {
   const router = useRouter();
   const [code, setCode] = React.useState("");
   const [isStarting, setIsStarting] = React.useState(false);
+  const [recent, setRecent] = React.useState<MeetingHistoryItem[] | null>(null);
   const today = React.useMemo(() => new Date(), []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    meetingsApi
+      .history(8)
+      .then((items) => {
+        if (!cancelled) setRecent(items);
+      })
+      .catch(() => {
+        if (!cancelled) setRecent([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const week = React.useMemo(() => {
     const start = startOfWeek(today);
@@ -227,32 +243,75 @@ export default function Home() {
               </div>
             </div>
 
-            <section className="flex flex-1 flex-col items-center justify-center py-10">
-              <Empty className="border-none shadow-none">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <VideoIcon />
-                  </EmptyMedia>
-                  <EmptyTitle>No meetings scheduled for today</EmptyTitle>
-                  <EmptyDescription>
-                    Start a meet now, or enter a code to join one that is already running.
-                  </EmptyDescription>
-                </EmptyHeader>
+            <section className="flex flex-1 flex-col py-6">
+              {recent && recent.length > 0 ? (
+                <div className="flex flex-col gap-3">
+                  <h2 className="font-heading text-sm font-medium text-muted-foreground">
+                    Recent
+                  </h2>
+                  <ul className="flex flex-col gap-2">
+                    {recent.map((item) => (
+                      <li key={item.code}>
+                        <Link
+                          href={`/room/${item.code}`}
+                          className="bg-card text-card-foreground hover:bg-accent flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="bg-primary/10 text-primary flex size-9 shrink-0 items-center justify-center rounded-lg"
+                          >
+                            <VideoIcon />
+                          </span>
+                          <span className="flex min-w-0 flex-1 flex-col">
+                            <span className="truncate font-medium">
+                              {item.title || "Untitled meet"}
+                            </span>
+                            <span className="text-muted-foreground truncate text-xs">
+                              {item.code} · {new Date(item.created_at).toLocaleString()}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium",
+                              item.status === "ended"
+                                ? "bg-muted text-muted-foreground"
+                                : "bg-success/15 text-success",
+                            )}
+                          >
+                            {item.status === "ended" ? "Ended" : "Live"}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <Empty className="border-none shadow-none">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <VideoIcon />
+                    </EmptyMedia>
+                    <EmptyTitle>No meetings yet</EmptyTitle>
+                    <EmptyDescription>
+                      Start a meet now, or enter a code to join one that is already running.
+                    </EmptyDescription>
+                  </EmptyHeader>
 
-                <Button
-                  variant="success"
-                  onClick={() => void startMeet()}
-                  disabled={isStarting}
-                  className="mt-4 rounded-full"
-                >
-                  {isStarting ? (
-                    <Spinner data-icon="inline-start" />
-                  ) : (
-                    <VideoIcon data-icon="inline-start" />
-                  )}
-                  New meet
-                </Button>
-              </Empty>
+                  <Button
+                    variant="success"
+                    onClick={() => void startMeet()}
+                    disabled={isStarting}
+                    className="mt-4 rounded-full"
+                  >
+                    {isStarting ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : (
+                      <VideoIcon data-icon="inline-start" />
+                    )}
+                    New meet
+                  </Button>
+                </Empty>
+              )}
             </section>
           </main>
         </div>

@@ -5,7 +5,7 @@ pipeline (validation, server-side scoring, host-only fan-out), the host's
 report (present/absent, scores, event timeline) and its CSV download.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -43,7 +43,7 @@ async def _create_exam(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 201, response.text
-    return response.json()
+    return cast(dict[str, Any], response.json())
 
 
 class TestCreateExam:

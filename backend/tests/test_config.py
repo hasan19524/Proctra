@@ -1,12 +1,16 @@
 """Configuration unit tests."""
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
 
-# Valid production-grade secrets so the production validator passes.
-_PROD_SECRETS = {
+# Valid production-grade secrets so the production validator passes. Typed as
+# Any-valued so `**` unpacking into Settings matches the pydantic-settings
+# signatures under strict mypy.
+_PROD_SECRETS: dict[str, Any] = {
     "secret_key": "x" * 48,
     "livekit_api_key": "real-api-key",
     "livekit_api_secret": "y" * 48,

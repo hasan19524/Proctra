@@ -62,6 +62,12 @@ Every frame is JSON:
 | `reaction.send` | `emoji` | no |
 | `hand.raise` / `hand.lower` | – | folded into presence |
 | `host.action` | `action` = lock, end, mute_participant, remove, permission toggle, waiting-room approve/deny | persisted where durable |
+| `proctor.event` | `signal`, `duration_s`, `detail` — exam meetings only; observation, not a score | persisted to report |
+
+`proctor.event` (Phase 16) is accepted only when the meeting is an exam with proctoring
+enabled; the host's own frames are ignored, the signal must be in a server-side
+whitelist, and it is rate-limited (30/min per user+meeting). The server computes the
+points and meeting minute itself — the payload is an observation, never a score.
 
 ### Server → Client events
 
@@ -78,6 +84,7 @@ Every frame is JSON:
 | `permission.changed` | meeting/participant permission delta |
 | `meeting.ended` / `meeting.locked` | terminal / policy events |
 | `waiting_room.admitted` | – |
+| `proctor.flag` | host-only (Phase 16): flagged signal, student, points, minute |
 
 ### Delivery guarantees
 
@@ -90,6 +97,13 @@ Every frame is JSON:
   restores the snapshot instead.
 - **Heartbeat**: client sends `ping` every 25 s, expects `pong`; missed pongs trigger
   reconnect with exponential backoff + jitter.
+
+### Exam snapshot additions (Phase 16)
+
+The `sync.state` meeting dict carries `kind` and `proctoring_enabled` for every meeting.
+Hosts of proctored exam meetings additionally receive `proctor_flags` — the last 200
+`proctor_events` with student display names — so an admitted host lands on a populated
+Integrity panel. Students never receive `proctor_flags`.
 
 ### Multi-worker fan-out
 

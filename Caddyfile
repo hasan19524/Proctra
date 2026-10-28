@@ -8,11 +8,13 @@
 
 {$DOMAIN:localhost} {
     # Security headers (defence in depth; FastAPI also sets these).
+    # camera/mic must be allowed on this origin: the prejoin lobby, the LiveKit
+    # SFU, and the exam proctoring engine all call getUserMedia here.
     header {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+        Permissions-Policy "camera=(self), microphone=(self), geolocation=(), payment=()"
         -Server
     }
 

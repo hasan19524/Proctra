@@ -292,7 +292,7 @@ disconnects also have to be observable by tests and by the removed client.
 - Terminal frames are *direct-sent to local sockets before* `kick` + close
   (4003): `kick: asyncio.Event` on `LocalConnection` wakes a pending
   `websocket.receive` (the ASGI test client does not wake it on app-initiated
-  close), then the same frame is published on pub/sub for other workers —
+  close), then the same frame is published on pub/sub for other workers ï¿½
   clients treat `meeting.ended`/`participant.removed` idempotently.
 - "Remove" disconnects only (Meet parity): a removed user can rejoin while the
   meeting is unlocked. Attendance is persisted per join/leave in
@@ -322,8 +322,8 @@ need CRDTs the spec never asks for.
 - `meeting_notes` holds up to two whole documents per meeting (`all` and
   `host_only`, UNIQUE per pair). Saves go over the existing socket as
   `note.save {visibility, content}` and broadcast `note.updated`; `sync.state`
-  re-seeds late joiners — same transport and membership checks as chat.
-- Content shape is `{"text": "<string>"}` inside JSONB — schema-compatible
+  re-seeds late joiners ï¿½ same transport and membership checks as chat.
+- Content shape is `{"text": "<string>"}` inside JSONB ï¿½ schema-compatible
   with a future rich-text structure without one now; saves are explicit
   (Save button), last-write-wins, capped at 100k characters (`invalid_note`).
 - `host_only` is enforced in three places: save authorization (host role
@@ -333,7 +333,7 @@ need CRDTs the spec never asks for.
   a private document.
 - The panel derives editor state in render: drafts adopt server-confirmed
   content only while clean, and `dirty` clears solely on an echo matching the
-  draft — a rejected save therefore stays visibly unsaved.
+  draft ï¿½ a rejected save therefore stays visibly unsaved.
 
 **Consequences.** Notes are durable, reconnect-safe, and private by default;
 upgrading to a real collaborative editor later means changing the content
@@ -351,12 +351,12 @@ raised hand (must survive reconnects and show up in snapshots).
 
 **Decision.**
 - Reactions travel as `reaction.send {label}` and fan out as
-  `reaction.received {user_id, name, label}` with no `seq` and no row —
+  `reaction.received {user_id, name, label}` with no `seq` and no row ï¿½
   invalidation is a server-side whitelist (the nine ReactionBar labels) plus
   the meeting's `allow_reactions` gate (`permission_denied` when off).
   Clients keep a capped, TTL-pruned list; the CSS float animation
   (`reaction-float`, `animation-fill-mode: forwards`) hides items after ~4s,
-  so rendering stays pure (no `Date.now()` in render — `react-hooks/purity`).
+  so rendering stays pure (no `Date.now()` in render ï¿½ `react-hooks/purity`).
 - Hand raise is just a `presence.update {hand_raised}` flag: the UI derives
   it from the roster (never local state), so every participant, the
   `sync.state` snapshot, and a rejoining user all agree.
@@ -514,3 +514,44 @@ one HTTP round trip.
 state - recovered, or visibly failed with chat still working - and the
 bounded-retry contract is pinned by tests on both sides, so future phases
 cannot silently regress it.
+
+---
+
+## D23 - Proctoring: self-hosted client-side vision, server-authoritative scoring
+
+**Status:** Accepted (2026-10-29, Phase 16)
+
+**Context.** Exam mode needs integrity signals (looking away, no face, multiple
+faces, speaking, eyes closed, tab hidden, video blur). Server-side video
+analysis would mean streaming camera frames to the backend - a privacy
+liability and a second media pipeline beside LiveKit (D1/D4) - while a cloud
+vision API would add an API-key dependency and per-call cost. At the same
+time, a purely client-computed integrity score would be trivially forgeable
+in the student's own browser. (Supersedes the blanket no-ML stance in D9 for
+proctoring only.)
+
+**Decision.**
+- Detection runs entirely on-device: a self-hosted MediaPipe face landmarker
+  (WASM + model served from `frontend/public`, no CDN, no API keys) samples a
+  hidden `<video>` at 2 Hz and classifies signals in a pure, unit-tested
+  detector (`src/lib/proctor/detector.ts`) with per-signal min-active debounce
+  and cooldown hysteresis, so a blink is not "eyes_closed" and a glance is not
+  "looking_away".
+- The client only *reports observations*: `proctor.event {signal, duration_s,
+  detail}` over the existing app socket (D4). It never sends a score.
+- The server owns truth: the gateway accepts events only for exam meetings
+  with proctoring enabled, exempts the host, whitelists the signal set,
+  rate-limits (30/min per user+meeting), and `proctor_service.record_event`
+  computes points from the server-side `PROCTOR_SIGNALS` table plus the
+  meeting minute, then persists to `proctor_events`. Hosts get live
+  `proctor.flag` frames (host-only fan-out via the relay-filter pattern from
+  D17) and a host-only report endpoint graded against the `meeting_invites`
+  roster.
+
+**Consequences.** Video never leaves the student's device (privacy story in
+SECURITY.md) and there are no third-party vision dependencies; the frontend
+image grows by ~44 MB of static WASM/model assets that the browser downloads
+lazily (only the variant it needs). The score is never client-authoritative,
+so tampering with the JS changes observations, not grades - and a determined
+student can still evade an on-device detector, which is a known limit of any
+client-side proctoring, not a defect of this design.

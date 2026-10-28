@@ -92,6 +92,26 @@ docker compose -f docker-compose.prod.yml exec postgres \
 - The in-memory connection registry is per-process; cross-process delivery uses
   Redis pub/sub (REALTIME.md §1).
 
+## Frontend assets: self-hosted MediaPipe
+
+Exam-mode proctoring ships ~44 MB of static assets inside the frontend image under
+`public/`:
+
+- `public/models/face_landmarker.task` (~3.6 MB) — the MediaPipe face landmarker model.
+- `public/mediapipe-wasm/` — vision WASM in module and nosimd variants.
+
+They are served by the frontend itself — no CDN and no API keys at runtime. The engine
+probes the browser once and downloads only the WASM variant it needs, so a single visitor
+pulls a small fraction of the total. Ensure the edge proxy serves `.wasm` with
+`Content-Type: application/wasm` (Caddy does this by default).
+
+## Edge proxy: camera / microphone permissions
+
+Caddy sets `Permissions-Policy: camera=(self), microphone=(self)`. Keep the equivalent on
+any edge proxy: a policy of `camera=(), microphone=()` denies `getUserMedia` site-wide and
+breaks every meeting, not just proctoring. Both the prejoin camera check and the
+proctoring engine require the origin to be allowed.
+
 ## Security checklist before going live
 
 - [ ] `SECRET_KEY` is 32+ chars and unique.
@@ -103,6 +123,8 @@ docker compose -f docker-compose.prod.yml exec postgres \
 - [ ] `COOKIE_SECURE=true`.
 - [ ] HTTPS is enforced (Caddy does this; verify the cert).
 - [ ] Database is not exposed on a public port (compose only exposes 80/443).
+- [ ] Edge proxy allows camera/microphone on the origin (`Permissions-Policy: camera=(self), microphone=(self)`).
+- [ ] `.wasm` is served with `Content-Type: application/wasm` (MediaPipe proctoring assets).
 
 ## CI
 

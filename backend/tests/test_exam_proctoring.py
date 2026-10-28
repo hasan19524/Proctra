@@ -177,6 +177,33 @@ class TestProctorEvents:
             await ws_student.receive_type("proctor.flag", timeout=0.4)
         await ws_student.close()
 
+    async def test_chat_mentioning_frame_type_still_delivers(self, client: AsyncClient) -> None:
+        """A chat body containing the literal `proctor.flag` text is ordinary
+        chat: the host-only filter matches the parsed frame type, so the
+        substring in a message body must not affect visibility."""
+        student = await _register(client, "ph6student@procto.dev", "Student")
+        other = await _register(client, "ph6other@procto.dev", "Other")
+        meeting_response = await client.post(
+            "/api/v1/meetings",
+            json={"title": "Regular"},
+            headers={"Authorization": f"Bearer {student['access_token']}"},
+        )
+        meeting = meeting_response.json()
+
+        ws_a = _ws(meeting["code"], student["access_token"])
+        await _connect_ready(ws_a)
+        ws_b = _ws(meeting["code"], other["access_token"])
+        await _connect_ready(ws_b)
+
+        await ws_a.send(
+            _envelope("chat.send", {"body": 'type "proctor.flag" here', "client_id": "c1"})
+        )
+        received = await ws_b.receive_type("chat.message")
+        assert "proctor.flag" in received["payload"]["body"]
+
+        await ws_a.close()
+        await ws_b.close()
+
     async def test_invalid_signal_is_rejected(self, client: AsyncClient) -> None:
         host = await _register(client, "ph3host@procto.dev", "Host")
         student = await _register(client, "ph3student@procto.dev", "Student")

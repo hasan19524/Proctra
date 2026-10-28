@@ -43,6 +43,7 @@ Roles in the meeting domain: `HOST`, `CO_HOST`, `PARTICIPANT` (platform role: `U
 | Input validation | Pydantic schemas on every REST body; WS payloads validated per event type |
 | WS authentication | token validated during the upgrade handshake; reconnects re-authenticate |
 | Audit logging | `audit_logs` for security-relevant actions (lock, remove, permission change) |
+| Exam meeting password | `kind = 'exam'` creation requires a password (min 8 chars), Argon2id-hashed, verified on join |
 
 ## 4. Transport & browser hardening
 
@@ -63,7 +64,29 @@ Roles in the meeting domain: `HOST`, `CO_HOST`, `PARTICIPANT` (platform role: `U
   outside the web root with randomized names.
 - Errors returned to clients are generic; detail goes to structured server logs.
 
-## 6. Explicitly out of scope (current phases)
+## 6. Proctoring trust model (Phase 16)
 
-AI/ML systems, proctoring/cheating detection, computer vision, LLM processing — these
-are future phases and are **not** implemented or stubbed with real logic.
+Exam meetings (`kind = 'exam'`, `proctoring_enabled`) follow the house rule: the client
+observes, the server decides.
+
+| Rule | Mechanism |
+|---|---|
+| Video never leaves the device | The face landmarker (MediaPipe WASM + model) is self-hosted under `/public` and runs on-device; only classified signal labels are sent over the app WebSocket. No CDN, no API keys, no server-side video processing or storage. |
+| The client only reports observations | `proctor.event {signal, duration_s, detail}` — an observation, never a score. |
+| The server owns validation | Signals are checked against a closed server-side whitelist; unknown values are rejected. Detail payloads are sanitized before persisting. |
+| The server owns scoring | Points and the meeting minute are computed server-side from `PROCTOR_SIGNALS` (`app/models/proctor.py`); a client cannot inflate or forge a score. |
+| Abuse is bounded | WS gateway rate limit: 30 proctor events/min per (user, meeting). |
+| The host is exempt | Host connections never generate events, and proctor frames from a host connection are ignored. |
+| Flags are host-only | `proctor.flag` frames are filtered at relay level (`_deliverable`), the same pattern as host-only notes — non-hosts never receive them. |
+| The report is host-only | `GET /meetings/{code}/report` and `.csv` re-derive the caller's host role server-side. |
+| Exam meetings require a password | Server-side schema validation rejects exam creation without a password of 8+ chars. |
+
+Known limit: on-device detection can be evaded by a determined student (covering the
+camera, a second device). The design keeps the *score* trustworthy regardless; it does
+not claim to make cheating impossible.
+
+## 7. Explicitly out of scope (current phases)
+
+LLM processing / AI meeting assistance — future phases, **not** implemented or stubbed
+with real logic. Client-side proctoring with server-authoritative scoring shipped in
+Phase 16 (§6) and is no longer out of scope.

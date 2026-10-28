@@ -2,7 +2,10 @@
 
 **Procto** is a real-time video meeting platform. The core product is a polished, modern
 meeting experience; Exam/Interview mode is a specialized mode built **on top of** the same
-Meeting Core — not a separate implementation.
+Meeting Core — not a separate implementation. Exam mode adds **AI proctoring**: a
+self-hosted vision model classifies integrity signals (looking away, no face, multiple
+faces, eyes closed, speaking, tab hidden) locally in the browser; the server scores and
+stores them, and the host gets a live integrity feed plus a downloadable report.
 
 ```text
                          PROCTO
@@ -28,8 +31,12 @@ Meeting Core — not a separate implementation.
        └── Meeting History
 ```
 
-Future layers (**not part of the current implementation**): AI Meeting Assistant,
-ML Proctoring Engine.
+In Exam/Interview mode, proctoring runs on top of Meeting Core: a self-hosted MediaPipe
+model classifies integrity signals **in the browser** (video never leaves the device), the
+server scores and persists them, and the host gets a live flag feed plus a report
+(`GET /meetings/{code}/report` + CSV).
+
+Future layers (**not part of the current implementation**): AI Meeting Assistant.
 
 ## Status
 

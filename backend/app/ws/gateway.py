@@ -138,43 +138,42 @@ async def _send(websocket: WebSocket, frame_text: str) -> None:
         await websocket.send_text(frame_text)
 
 
-def _is_host_only_note(frame_text: str) -> bool:
-    """True when this broadcast frame carries a host-only notes document."""
-    if '"note.updated"' not in frame_text:
-        return False
-    try:
-        payload = json.loads(frame_text).get("payload") or {}
-    except (ValueError, TypeError, AttributeError):
-        return False
-    return isinstance(payload, dict) and payload.get("visibility") == VISIBILITY_HOST_ONLY
+def _deliverable(frame_text: str, waiting: bool, is_host: bool) -> bool:
+    """One parse per delivery decides visibility for a connection.
 
-
-def _is_host_only_frame(frame_text: str) -> bool:
-    """True when a broadcast frame must never reach a non-host connection.
-
-    Covers host-only notes (Phase 7) and proctoring flag fan-out (Phase 16 —
-    a student's cheating score is private to the host, never broadcast).
+    Three rules, in order (Phase 16 refactor — this used to parse the frame
+    two or three times across separate predicates):
+      * waiting-room connections only see the WAITING_VISIBLE_FRAMES allowlist;
+      * ``proctor.flag`` is host-only (a student's cheating score is private
+        to the proctor — matched on the parsed frame type, not a substring);
+      * host-only notes are hidden from non-hosts (Phase 7).
+    A malformed frame falls through as deliverable: these are always
+    server-generated, and hiding them would mask bugs.
     """
-    if '"proctor.flag"' in frame_text:
-        return True
-    return _is_host_only_note(frame_text)
-
-
-def _frame_type(frame_text: str) -> str | None:
-    """Best-effort event type of a serialized frame (malformed -> None)."""
     try:
         parsed = json.loads(frame_text)
     except (ValueError, TypeError):
-        return None
-    frame_type = parsed.get("type") if isinstance(parsed, dict) else None
-    return frame_type if isinstance(frame_type, str) else None
+        return True
+    if not isinstance(parsed, dict):
+        return True
+    frame_type = parsed.get("type")
+
+    if waiting:
+        return frame_type in WAITING_VISIBLE_FRAMES
+    if is_host:
+        return True
+    if frame_type == "proctor.flag":
+        return False
+    if frame_type == "note.updated":
+        payload = parsed.get("payload") or {}
+        if isinstance(payload, dict) and payload.get("visibility") == VISIBILITY_HOST_ONLY:
+            return False
+    return True
 
 
 async def _deliver(conn: "LocalConnection", frame_text: str) -> None:
     """Send one broadcast frame to a local connection, honoring visibility."""
-    if _is_host_only_frame(frame_text) and not conn.is_host:
-        return
-    if conn.waiting and _frame_type(frame_text) not in WAITING_VISIBLE_FRAMES:
+    if not _deliverable(frame_text, conn.waiting, conn.is_host):
         return
     await _send(conn.websocket, frame_text)
 
@@ -201,9 +200,7 @@ async def _relay(websocket: WebSocket, meeting_code: str, conn_id: str, pubsub: 
             conn = get_registry().get(conn_id)
             if conn is None or conn.closed:
                 break
-            if _is_host_only_frame(data) and not conn.is_host:
-                continue
-            if conn.waiting and _frame_type(data) not in WAITING_VISIBLE_FRAMES:
+            if not _deliverable(data, conn.waiting, conn.is_host):
                 continue
             await _send(websocket, data)
     except asyncio.CancelledError:

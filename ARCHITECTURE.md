@@ -55,8 +55,11 @@ Exam/Int. ───┘
 - `src/lib/api` — typed REST client (fetch wrapper, access-token injection).
 - `src/lib/ws` — WebSocket client with reconnect + event envelope handling.
 - `src/lib/livekit` — LiveKit room provider/connection helpers.
+- `src/lib/proctor` — client-side proctoring: self-hosted MediaPipe face landmarker,
+  pure signal classifier (`detector.ts`), camera sampling `engine.ts`.
 - `src/stores` — Zustand stores (session, meeting UI state).
-- `src/hooks` — reusable hooks.
+- `src/hooks` — reusable hooks, incl. `use-proctoring` (exam proctoring lifecycle,
+  tab-visibility signal, prejoin self-check).
 - Server state fetched via TanStack Query; ephemeral UI state in Zustand.
 
 Frontend role checks are **UX only**. Authorization is enforced by the backend.
@@ -71,7 +74,7 @@ backend/app/
 ├── ws/              # WebSocket gateway: connect auth, event registry, handlers
 ├── models/          # SQLAlchemy ORM models
 ├── schemas/         # Pydantic request/response contracts
-├── services/        # business logic (auth, meeting, chat) — routers stay thin
+├── services/        # business logic (auth, meeting, chat, proctor) — routers stay thin
 └── db/              # engine, session, base, alembic env
 ```
 
@@ -117,6 +120,29 @@ Details: [SECURITY.md](./SECURITY.md).
 - Reconnect: the client sends `sync` with the last processed sequence and the server
   replays durable events (chat) so messages are not lost on transient network failures.
 
+### Exam proctoring pipeline
+
+Exam meetings (`meetings.kind = 'exam'` with `proctoring_enabled`) add integrity
+signalling on the same socket. Detection is client-side; scoring, persistence and
+fan-out are server-side:
+
+```text
+hidden <video>  →  MediaPipe landmarker (2 Hz, self-hosted WASM, on-device)
+               →  classified signal (looking_away | no_face | multiple_faces |
+                                     speaking | eyes_closed | tab_hidden | video_blur)
+               →  WS client frame  proctor.event {signal, duration_s, detail}
+               →  gateway: exam + proctoring gate, host exempt, signal whitelist,
+                  30/min per (user, meeting)
+               →  proctor_service.record_event → proctor_events
+                  (points + meeting minute computed server-side)
+               →  WS server frame  proctor.flag  (host-only fan-out)
+               →  Integrity panel / GET /meetings/{code}/report(.csv) (host-only)
+```
+
+Video frames never leave the device — only signal labels cross the wire
+(see [SECURITY.md](./SECURITY.md) §6). Students never receive `proctor.flag` frames or
+the `proctor_flags` snapshot field.
+
 ## 8. WebRTC / SFU architecture
 
 **SFU: LiveKit** (see [DECISIONS.md](./DECISIONS.md) for the comparison against mediasoup
@@ -142,16 +168,19 @@ State ownership:
 | tracks, connection quality, screen share stream | LiveKit |
 | roles, permissions, lock, waiting room, password | FastAPI (Postgres) |
 | chat, presence feed | FastAPI WS + Postgres (history) |
+| proctoring events, integrity score/report | FastAPI (Postgres; the client only classifies video on-device) |
 | view of all of the above | frontend (derived) |
 
 ## 9. Storage architecture
 
-- **Postgres** — users, meetings, participants history, messages, notes, audit logs.
+- **Postgres** — users, meetings, participants history, messages, notes, audit logs,
+  proctor events (signal labels only, no media).
 - **Redis** — refresh-session metadata, rate-limit counters, WS pub/sub fan-out.
 - **LiveKit** — ephemeral media only; it stores nothing durable.
 - Uploaded files (chat attachments, Phase 9): local disk volume initially, behind a
   `storage` interface so object storage can replace it later.
-- No AI/ML processing and no ML storage.
+- No server-side AI/ML processing and no media storage: the proctoring vision model runs
+  on-device in the browser; only classified signal labels are persisted.
 
 ## 10. Deployment architecture
 
@@ -168,7 +197,7 @@ environment. Not part of the current phases.
 ## 11. State categories (project principle #7)
 
 ```text
-Persistent DB state   users, meetings, messages, notes, audit
+Persistent DB state   users, meetings, messages, notes, audit, proctor events
 Backend runtime state WS registry (connection id → user/meeting)
 Redis state           pub/sub channels, rate-limit counters, sessions
 WebRTC state          tracks, publishers, subscribers, quality (LiveKit)

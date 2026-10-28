@@ -127,6 +127,40 @@ meeting_history  (or derived views over meetings + meeting_participants)
   duration, participant_count, status derived from meetings/attendance rows
 ```
 
+### Phase 16 — Exam mode & proctoring
+
+Migration `0f3c9d1a2b4e` (phase_16_exam_mode_proctoring).
+
+`meetings` gains two columns:
+
+```text
+kind                  TEXT NOT NULL DEFAULT 'standard'
+                      CHECK (kind IN ('standard','exam'))
+proctoring_enabled    BOOLEAN NOT NULL DEFAULT FALSE
+```
+
+```text
+meeting_invites  (expected-student roster the integrity report is graded against)
+  id             UUID PK
+  meeting_id     UUID FK -> meetings ON DELETE CASCADE
+  email          CITEXT NOT NULL
+  created_at     TIMESTAMPTZ NOT NULL
+  UNIQUE (meeting_id, email)
+
+proctor_events
+  id             UUID PK
+  meeting_id     UUID FK -> meetings ON DELETE CASCADE
+  user_id        UUID FK -> users ON DELETE CASCADE
+  signal         VARCHAR(24) NOT NULL
+                 CHECK (signal IN ('looking_away','no_face','multiple_faces',
+                                   'speaking','eyes_closed','tab_hidden','video_blur'))
+  points         INTEGER NOT NULL           -- server-computed; video_blur always 0
+  minute         INTEGER NOT NULL           -- minutes since meeting opened
+  duration_s     FLOAT NULL
+  detail         JSONB NULL
+  created_at     TIMESTAMPTZ NOT NULL
+```
+
 ### Phase 17 — Exam/Interview (future)
 
 ```text
@@ -140,6 +174,8 @@ exams, exam_enrollments, exam_sessions   -- reuses meetings table + Meeting Core
 - `meeting_messages (meeting_id, seq)` — ordering + reconnect replay
 - `meeting_participants (meeting_id, joined_at)` — attendance queries
 - `audit_logs (meeting_id, created_at)`
+- `meeting_invites (meeting_id, email)` (unique)
+- `proctor_events (meeting_id, created_at)`, `proctor_events (meeting_id, user_id)` — report queries
 
 ## Redis keyspace
 

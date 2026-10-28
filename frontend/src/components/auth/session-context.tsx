@@ -38,6 +38,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     let active = true;
+    // Safety net: if the session check never settles (network stall), leave the
+    // spinner state so RequireSession can redirect to /login instead of hanging.
+    const stallTimer = window.setTimeout(() => {
+      if (active) {
+        setUser(null);
+        setStatus("unauthenticated");
+      }
+    }, 12_000);
+
     refreshSession()
       .then((auth) => {
         if (!active) return;
@@ -48,9 +57,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (!active) return;
         setUser(null);
         setStatus("unauthenticated");
+      })
+      .finally(() => {
+        window.clearTimeout(stallTimer);
       });
     return () => {
       active = false;
+      window.clearTimeout(stallTimer);
     };
   }, []);
 

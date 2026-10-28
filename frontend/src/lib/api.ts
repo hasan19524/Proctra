@@ -41,6 +41,9 @@ export class ApiError extends Error {
 let accessToken: string | null = null;
 let refreshInFlight: Promise<AuthResponse> | null = null;
 
+/** Hard cap on any API call so a stalled server can never hang the UI. */
+const REQUEST_TIMEOUT_MS = 10_000;
+
 export function getAccessToken(): string | null {
   return accessToken;
 }
@@ -81,6 +84,18 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, await readErrorMessage(response));
 }
 
+/** Convert a fetch timeout into an ApiError so callers never see a raw hang. */
+async function guardTimeout(promise: Promise<Response>): Promise<Response> {
+  try {
+    return await promise;
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError(0, "The server took too long to respond. Try again.");
+    }
+    throw error;
+  }
+}
+
 /**
  * Exchange the refresh cookie for a fresh access token.
  * Concurrent callers share a single in-flight request.
@@ -90,6 +105,9 @@ export function refreshSession(): Promise<AuthResponse> {
     refreshInFlight = fetch("/api/v1/auth/refresh", {
       method: "POST",
       credentials: "same-origin",
+      // Never hang the session check: a stalled network must resolve to an
+      // error (and a redirect to /login) instead of an infinite spinner.
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
       .then(async (response) => {
         if (!response.ok) {
@@ -99,6 +117,14 @@ export function refreshSession(): Promise<AuthResponse> {
         const auth = (await response.json()) as AuthResponse;
         accessToken = auth.access_token;
         return auth;
+      })
+      .catch((error: unknown) => {
+        accessToken = null;
+        // Surface timeouts/network failures as an ApiError with a clear message.
+        if (error instanceof DOMException && error.name === "TimeoutError") {
+          throw new ApiError(0, "The server took too long to respond. Try again.");
+        }
+        throw error;
       })
       .finally(() => {
         refreshInFlight = null;
@@ -129,13 +155,14 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       credentials: "same-origin",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
-  let response = await send(accessToken);
+  let response = await guardTimeout(send(accessToken));
 
   if (response.status === 401 && auth && accessToken) {
     const refreshed = await refreshSession();
-    response = await send(refreshed.access_token);
+    response = await guardTimeout(send(refreshed.access_token));
   }
 
   if (!response.ok) {

@@ -44,6 +44,8 @@ Roles in the meeting domain: `HOST`, `CO_HOST`, `PARTICIPANT` (platform role: `U
 | WS authentication | token validated during the upgrade handshake; reconnects re-authenticate |
 | Audit logging | `audit_logs` for security-relevant actions (lock, remove, permission change) |
 | Exam meeting password | `kind = 'exam'` creation requires a password (min 8 chars), Argon2id-hashed, verified on join |
+| Evidence storage | Private object-store buckets (MinIO dev / R2 prod); server-side authz on every read (owner or host); credentials never reach the frontend |
+| Evidence audit | `audit_logs` records `report_download`, `file_upload`, `file_download`, `file_delete`, `file_hold` |
 
 ## 4. Transport & browser hardening
 
@@ -60,8 +62,14 @@ Roles in the meeting domain: `HOST`, `CO_HOST`, `PARTICIPANT` (platform role: `U
 
 - Passwords, refresh tokens, and join secrets are never logged.
 - Messages/notes are scoped to their meeting in every query — no cross-meeting reads.
-- File uploads (Phase 9): size limits, extension/content-type allow-list, stored
-  outside the web root with randomized names.
+- Evidence/attachment uploads (D24): Content-Length pre-check plus per-purpose byte
+  caps (clip 50 MB, screenshot 10 MB, attachment 25 MB), magic-byte content sniffing
+  (the declared Content-Type is ignored), randomized UUID object keys in private
+  buckets, storage credentials server-side only. Reads go through the backend so
+  every access is authorized and audit-logged; another student's file is a 404
+  (no existence oracle). Retention cleanup skips files under `legal_hold`.
+- A missing or failed clip upload is reported honestly (`failed`/`missing`) and
+  never treated as evidence of cheating by itself.
 - Errors returned to clients are generic; detail goes to structured server logs.
 
 ## 6. Proctoring trust model (Phase 16)
@@ -80,6 +88,7 @@ observes, the server decides.
 | Flags are host-only | `proctor.flag` frames are filtered at relay level (`_deliverable`), the same pattern as host-only notes — non-hosts never receive them. |
 | The report is host-only | `GET /meetings/{code}/report` and `.csv` re-derive the caller's host role server-side. |
 | Exam meetings require a password | Server-side schema validation rejects exam creation without a password of 8+ chars. |
+| Evidence clips are server-validated | A clip must reference the uploader's **own** event in the same exam (verified server-side); a partial unique index allows one active clip per event; the report carries the honest clip status (`uploaded`/`failed`/`missing`). |
 
 Known limit: on-device detection can be evaded by a determined student (covering the
 camera, a second device). The design keeps the *score* trustworthy regardless; it does

@@ -22,6 +22,7 @@ from app.schemas.meeting import (
     ReportOut,
 )
 from app.services import meeting_service, proctor_service
+from app.services.audit_service import audit
 from app.services.meeting_service import MeetingNotFoundError
 from app.ws.waiting import APPROVED, get_decision
 
@@ -191,8 +192,9 @@ async def get_exam_report(
 ) -> ReportOut:
     """Full exam report: roster (present/absent) + per-student scores + events.
 
-    Host-only. Returns JSON for the UI's live integrity panel; use
-    ``GET /{code}/report.csv`` for the downloadable file.
+    Host-only. Returns JSON for the UI's live integrity panel (polled, so not
+    audit-logged — the same data is streamed live over the WS); use
+    ``GET /{code}/report.csv`` for the downloadable file, which is audited.
     """
     await rate_limit("report_fetch", str(user.id), 30, 60)
     meeting = await _require_host_report(code, user, session)
@@ -210,6 +212,14 @@ async def download_exam_report_csv(
     meeting = await _require_host_report(code, user, session)
     report = await proctor_service.build_report(session, meeting)
     csv_text = proctor_service.report_to_csv(report)
+    await audit(
+        session,
+        meeting_id=meeting.id,
+        actor_id=user.id,
+        action="report_download",
+        detail={"format": "csv"},
+    )
+    await session.commit()
     return Response(
         content=csv_text,
         media_type="text/csv",

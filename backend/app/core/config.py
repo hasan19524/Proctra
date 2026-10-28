@@ -11,6 +11,7 @@ load the same values as commands run from the root.
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -84,6 +85,31 @@ class Settings(BaseSettings):
     # `None` means "follow the environment" (secure in production, off in dev
     # where the app is served over plain http://localhost).
     cookie_secure: bool | None = Field(default=None, alias="COOKIE_SECURE")
+
+    # ---- Object storage (DECISIONS.md D24) ----
+    # Provider selection: minio in development/testing, r2 in cloud production.
+    # The concrete provider is resolved by app.storage at startup; business
+    # logic only ever sees the ObjectStorage interface.
+    storage_provider: Literal["minio", "r2"] = Field(default="minio", alias="STORAGE_PROVIDER")
+    # MinIO (S3-compatible, local dev/test — no internet or credentials needed).
+    minio_endpoint: str = Field(default="localhost:9000", alias="MINIO_ENDPOINT")
+    minio_access_key: str = Field(default="minioadmin", alias="MINIO_ACCESS_KEY")
+    minio_secret_key: str = Field(default="minioadmin", alias="MINIO_SECRET_KEY")
+    minio_bucket: str = Field(default="procto", alias="MINIO_BUCKET")
+    minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
+    # Cloudflare R2 (S3-compatible cloud storage — production).
+    r2_account_id: str = Field(default="", alias="R2_ACCOUNT_ID")
+    r2_access_key_id: str = Field(default="", alias="R2_ACCESS_KEY_ID")
+    r2_secret_access_key: str = Field(default="", alias="R2_SECRET_ACCESS_KEY")
+    r2_bucket: str = Field(default="", alias="R2_BUCKET")
+    # Evidence behaviour shared by every provider.
+    storage_signed_url_ttl_seconds: int = Field(default=300, alias="STORAGE_SIGNED_URL_TTL_SECONDS")
+    # Days until uploaded objects become eligible for automatic cleanup
+    # (0 = keep forever). Files under a legal hold are never purged.
+    storage_retention_days: int = Field(default=90, alias="STORAGE_RETENTION_DAYS")
+    # Hours between retention cleanup runs; 0 disables the background sweeper
+    # (tests and tooling can still call purge_expired_files() directly).
+    storage_cleanup_interval_hours: int = Field(default=6, alias="STORAGE_CLEANUP_INTERVAL_HOURS")
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod

@@ -4,7 +4,7 @@
 
 | Tool | Version | Purpose |
 |---|---|---|
-| Docker + Compose | recent | infrastructure (postgres, redis, livekit) |
+| Docker + Compose | recent | infrastructure (postgres, redis, livekit, minio) |
 | Node.js | 20+ | frontend |
 | Python | 3.13+ | backend |
 | uv | latest | Python env + dependency management |
@@ -34,7 +34,7 @@ Windows (PowerShell):
 
 ```powershell
 ./scripts/procto.ps1 setup      # deps + .env + migrations
-./scripts/procto.ps1 infra up   # postgres + redis + livekit
+./scripts/procto.ps1 infra up   # postgres + redis + livekit + minio
 ./scripts/procto.ps1 dev        # backend :8001 + frontend :3001
 ```
 
@@ -42,7 +42,7 @@ Linux / macOS (Make):
 
 ```bash
 cp .env.example .env      # fill in secrets (LiveKit keys are generated for you)
-make infra-up             # start postgres + redis + livekit
+make infra-up             # start postgres + redis + livekit + minio
 make setup                # backend deps + frontend deps + db migration
 make dev                  # backend :8001 + frontend :3001
 ```
@@ -76,6 +76,7 @@ Windows: `./scripts/procto.ps1 <verb>` · elsewhere: `make <target>`.
 | 5434 | PostgreSQL (host port; container 5432) |
 | 6380 | Redis (host port; container 6379) |
 | 7880 / 7881 | LiveKit HTTP + RTC (UDP 50000-50099 in compose) |
+| 9000 / 9001 | MinIO S3 API + console (object storage for evidence/files, D24) |
 
 Ports are offset from the usual 3000/8000/5432/6379 to coexist with other projects
 on this machine — see [DECISIONS.md](./DECISIONS.md) D10.
@@ -87,6 +88,7 @@ on this machine — see [DECISIONS.md](./DECISIONS.md) D10.
 | Backend unit/service | `pytest` + `pytest-asyncio` | every phase |
 | Backend API | `httpx.AsyncClient` against the FastAPI app | every phase with endpoints |
 | Backend WS | FastAPI `TestClient` websocket support | realtime phases |
+| Backend storage | `pytest` against the real local MinIO (S3-compatible) | object-storage changes |
 | Frontend unit | `vitest` + React Testing Library | component logic |
 | Frontend type | `tsc --noEmit` | every phase |
 | E2E / multi-browser | Playwright | Phase 15 (full E2E validation) |
@@ -117,6 +119,8 @@ boundary.
 | 13 — Security hardening | ✅ done |
 | 14 — History + polish | ✅ done |
 | 15 — Full E2E validation | ✅ done |
+| 16 — Exam mode & proctoring | ✅ done |
+| 17 — Object storage (MinIO dev / R2 prod) | ✅ done |
 
 ## Conventions
 

@@ -52,6 +52,27 @@ services:
     volumes:
       - ./livekit/livekit.yaml:/etc/livekit/livekit.yaml:ro
 
+  # MinIO — S3-compatible object storage for evidence clips, screenshots, and
+  # attachments in development and tests (DECISIONS.md D24 Phase A).
+  # Production uses Cloudflare R2 instead — no object store runs in prod compose.
+  #
+  # Image note: `minio/minio` was deleted from Docker Hub (Sept 2026) and quay.io
+  # now requires login for anonymous pulls; `bitnamilegacy/minio` is the last
+  # anonymously-pullable image of the AGPL community server. A pinned
+  # `minio/minio:RELEASE.2025-09-07T16-13-09Z` from a cached mirror also works.
+  minio:
+    image: bitnamilegacy/minio:latest
+    restart: unless-stopped
+    command: ["server", "/bitnami/minio/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"    # S3 API (backend connects here; buckets auto-created)
+      - "9001:9001"    # web console (http://localhost:9001)
+    volumes:
+      - procto-minio:/bitnami/minio    # non-root image: data must live under /bitnami
+
   # ------------------------------------------------------------------
   # Optional: full stack in Docker (make dev-full). Disabled by default.
   # ------------------------------------------------------------------
@@ -80,3 +101,4 @@ services:
 volumes:
   procto-pgdata:
   procto-redis:
+  procto-minio:

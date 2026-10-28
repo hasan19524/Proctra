@@ -45,7 +45,7 @@ Procto commands:
   lint          run linters + format check
   typecheck     run type checkers
   fmt           auto-fix formatting
-  infra up|down manage Docker infrastructure (postgres, redis, livekit)
+  infra up|down manage Docker infrastructure (postgres, redis, livekit, minio)
   db upgrade|revision [msg]   run Alembic migrations
 "@
     }

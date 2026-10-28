@@ -25,6 +25,12 @@ AUDIT_ACTIONS = frozenset(
         "set_permissions",
         "waiting_approve",
         "waiting_reject",
+        # Phase 17 — evidence/report handling (D24 §6: access must be auditable).
+        "report_download",
+        "file_upload",
+        "file_download",
+        "file_delete",
+        "file_hold",
     }
 )
 

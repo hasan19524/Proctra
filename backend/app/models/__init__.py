@@ -3,10 +3,12 @@
 Tables are introduced per phase via Alembic migrations:
 users/refresh_tokens (Phase 2), meetings (Phase 3), participants (Phase 6),
 messages (Phase 5), notes (Phase 7), audit_logs (Phase 13),
-meeting_invites + proctor_events (Phase 16 — exam mode).
+meeting_invites + proctor_events (Phase 16 — exam mode),
+stored_files (Phase 17 — object storage).
 """
 
 from app.models.audit import AuditLog
+from app.models.file import StoredFile
 from app.models.invite import MeetingInvite
 from app.models.meeting import Meeting
 from app.models.message import Message
@@ -24,5 +26,6 @@ __all__ = [
     "Message",
     "ProctorEvent",
     "RefreshToken",
+    "StoredFile",
     "User",
 ]

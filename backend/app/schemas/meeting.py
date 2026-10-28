@@ -88,7 +88,13 @@ class LiveKitTokenOut(BaseModel):
 
 
 class ProctorFlagOut(BaseModel):
-    """One proctoring event, as fanned out to the host over the WS."""
+    """One proctoring event, as fanned out to the host over the WS.
+
+    ``clip_file_id``/``clip_status`` are populated only in the downloadable
+    report (live flags stream before any clip exists); ``clip_status`` is the
+    *stored* truth — ``failed``/``missing`` uploads are reported honestly and a
+    missing clip never implies cheating by itself.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -101,6 +107,8 @@ class ProctorFlagOut(BaseModel):
     minute: int
     duration_s: float
     created_at: datetime
+    clip_file_id: UUID | None = None
+    clip_status: str | None = None
 
 
 class ProctorStudentOut(BaseModel):

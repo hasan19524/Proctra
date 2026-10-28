@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.file import StoredFile
 from app.models.invite import MeetingInvite
 from app.models.meeting import Meeting
 from app.models.participant import MeetingParticipant
@@ -112,7 +113,13 @@ async def record_event(
     return event
 
 
-def flag_out(event: ProctorEvent, name: str) -> ProctorFlagOut:
+def flag_out(
+    event: ProctorEvent,
+    name: str,
+    *,
+    clip_file_id: uuid.UUID | None = None,
+    clip_status: str | None = None,
+) -> ProctorFlagOut:
     """Shape one stored event as the host-facing flag DTO."""
     return ProctorFlagOut(
         id=event.id,
@@ -124,6 +131,8 @@ def flag_out(event: ProctorEvent, name: str) -> ProctorFlagOut:
         minute=event.minute,
         duration_s=event.duration_s,
         created_at=event.created_at,
+        clip_file_id=clip_file_id,
+        clip_status=clip_status,
     )
 
 
@@ -213,9 +222,35 @@ async def build_report(session: AsyncSession, meeting: Meeting) -> ReportOut:
 
     # --- events per student ------------------------------------------------
     flags = await list_recent_flags(session, meeting.id, limit=5000)
+
+    # Evidence clips keyed by event (newest record wins when a clip was
+    # re-uploaded). Statuses — including failed/missing — flow into the report
+    # so gaps are visible instead of silently absent.
+    clip_rows = (
+        await session.execute(
+            select(StoredFile.id, StoredFile.upload_status, StoredFile.proctor_event_id)
+            .where(
+                StoredFile.meeting_id == meeting.id,
+                StoredFile.proctor_event_id.is_not(None),
+            )
+            .order_by(StoredFile.created_at)
+        )
+    ).all()
+    clips: dict[uuid.UUID, tuple[uuid.UUID, str]] = {
+        row.proctor_event_id: (row.id, row.upload_status) for row in clip_rows
+    }
+
     events_by_user: dict[uuid.UUID, list[ProctorFlagOut]] = {}
     for event, name in flags:
-        events_by_user.setdefault(event.user_id, []).append(flag_out(event, name))
+        clip = clips.get(event.id)
+        events_by_user.setdefault(event.user_id, []).append(
+            flag_out(
+                event,
+                name,
+                clip_file_id=clip[0] if clip else None,
+                clip_status=clip[1] if clip else None,
+            )
+        )
 
     students: list[ReportStudentOut] = []
     seen_emails: set[str] = set()
@@ -269,11 +304,25 @@ def report_to_csv(report: ReportOut) -> str:
     """Render the report as a CSV file the proctor can download.
 
     One row per event (so the timeline with points is explicit), plus a
-    summary row per student. Uses ``csv`` for correct quoting.
+    summary row per student. Uses ``csv`` for correct quoting. The clip
+    columns carry the evidence reference and its *stored* status (``uploaded``
+    / ``failed`` / ``missing``) — empty when no clip record exists.
     """
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["student", "email", "status", "cheating_score", "signal", "points", "minute"])
+    writer.writerow(
+        [
+            "student",
+            "email",
+            "status",
+            "cheating_score",
+            "signal",
+            "points",
+            "minute",
+            "clip_file_id",
+            "clip_status",
+        ]
+    )
     for student in report.students:
         if not student.events:
             writer.writerow(
@@ -282,6 +331,8 @@ def report_to_csv(report: ReportOut) -> str:
                     student.email,
                     student.status,
                     student.cheating_score,
+                    "",
+                    "",
                     "",
                     "",
                     "",
@@ -298,6 +349,8 @@ def report_to_csv(report: ReportOut) -> str:
                     event.label,
                     event.points,
                     event.minute,
+                    str(event.clip_file_id) if event.clip_file_id else "",
+                    event.clip_status or "",
                 ]
             )
     return buf.getvalue()

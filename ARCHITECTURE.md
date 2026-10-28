@@ -174,19 +174,25 @@ State ownership:
 ## 9. Storage architecture
 
 - **Postgres** — users, meetings, participants history, messages, notes, audit logs,
-  proctor events (signal labels only, no media).
+  proctor events (signal labels only, no media), `stored_files` object metadata.
 - **Redis** — refresh-session metadata, rate-limit counters, WS pub/sub fan-out.
 - **LiveKit** — ephemeral media only; it stores nothing durable.
-- Uploaded files (chat attachments, Phase 9): local disk volume initially, behind a
-  `storage` interface so object storage can replace it later.
-- No server-side AI/ML processing and no media storage: the proctoring vision model runs
+- **Object storage** (D24) — evidence clips, screenshots, attachments: one
+  `ObjectStorage` ABC (`backend/app/storage`) with two S3-compatible providers,
+  **MinIO** (Docker Compose, `localhost:9000`) for development/testing and
+  **Cloudflare R2** for production, chosen by `STORAGE_PROVIDER` and validated at
+  startup. Postgres stores object *keys* (never provider URLs), so the provider
+  can be swapped with an object migration. Reads are proxied through the backend
+  with server-side authorization, Range support, and an audit row per access;
+  short-lived presigned URLs are minted only behind an authorized endpoint.
+- No server-side AI/ML processing: the proctoring vision model runs
   on-device in the browser; only classified signal labels are persisted.
 
 ## 10. Deployment architecture
 
 Local development today (Phase 0):
 
-- Docker Compose runs **infrastructure only**: `postgres`, `redis`, `livekit`.
+- Docker Compose runs **infrastructure only**: `postgres`, `redis`, `livekit`, `minio`.
 - `backend` and `frontend` run natively with hot reload (`make dev`).
 - `make dev-full` runs everything in Docker when a clean-machine run is needed.
 

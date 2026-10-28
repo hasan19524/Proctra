@@ -1,7 +1,8 @@
 """FastAPI application factory."""
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,11 +65,33 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
-    yield
-    # Close the shared LiveKit SFU client (aiohttp session) on shutdown.
-    from app.services.sfu_service import shutdown as sfu_shutdown
+    # Validate object-storage configuration eagerly (D24 §4): a misconfigured
+    # deployment must fail clearly at startup, not on the first upload.
+    from app.storage import get_storage
 
-    await sfu_shutdown()
+    storage = get_storage()
+    # Retention sweeper (D24 §6): sleeps first so startup never races it.
+    from app.services.storage_service import retention_sweep_loop
+
+    sweep_task: asyncio.Task[None] | None = None
+    if settings.storage_cleanup_interval_hours > 0:
+        sweep_task = asyncio.create_task(
+            retention_sweep_loop(
+                settings.storage_cleanup_interval_hours,
+                storage=storage,
+            )
+        )
+    try:
+        yield
+    finally:
+        if sweep_task is not None:
+            sweep_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await sweep_task
+        # Close the shared LiveKit SFU client (aiohttp session) on shutdown.
+        from app.services.sfu_service import shutdown as sfu_shutdown
+
+        await sfu_shutdown()
 
 
 def create_app() -> FastAPI:
@@ -94,7 +117,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.backend_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["authorization", "content-type"],
         expose_headers=["X-Request-ID"],
     )

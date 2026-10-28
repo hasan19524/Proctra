@@ -161,10 +161,36 @@ proctor_events
   created_at     TIMESTAMPTZ NOT NULL
 ```
 
-### Phase 17 — Exam/Interview (future)
+### Phase 17 — Object storage (stored_files)
+
+Migration `b7e2a91c40d3` (phase_17_object_storage). Bytes live in MinIO/R2
+(D24); Postgres owns metadata, permissions, and retention:
 
 ```text
-exams, exam_enrollments, exam_sessions   -- reuses meetings table + Meeting Core
+stored_files
+  id                    UUID PK
+  meeting_id            UUID FK -> meetings ON DELETE CASCADE
+  user_id               UUID FK -> users ON DELETE CASCADE      -- uploader
+  proctor_event_id      UUID FK -> proctor_events ON DELETE SET NULL
+  storage_key           VARCHAR(512) NOT NULL UNIQUE   -- private key, never a URL
+  provider              VARCHAR(16) NOT NULL           -- 'minio' | 'r2'
+  purpose               VARCHAR(24) NOT NULL
+                        CHECK (purpose IN ('evidence_clip','screenshot','attachment'))
+  mime_type             VARCHAR(96) NOT NULL           -- sniffed from magic bytes
+  file_size             BIGINT NOT NULL
+  original_name         VARCHAR(255) NULL
+  upload_status         VARCHAR(16) NOT NULL DEFAULT 'pending'
+                        CHECK (upload_status IN ('pending','uploaded','failed',
+                                                 'missing','deleted','purged'))
+  legal_hold            BOOLEAN NOT NULL DEFAULT FALSE  -- freezes retention/cleanup
+  retention_expires_at  TIMESTAMPTZ NULL                -- NULL = keep forever
+  created_at            TIMESTAMPTZ NOT NULL
+  deleted_at            TIMESTAMPTZ NULL                -- tombstone
+
+  INDEX (meeting_id, created_at)
+  INDEX (retention_expires_at)                 -- retention sweep
+  UNIQUE (proctor_event_id) WHERE proctor_event_id IS NOT NULL
+                              AND deleted_at IS NULL      -- one active clip per event
 ```
 
 ## Indexes (planned)
@@ -176,6 +202,8 @@ exams, exam_enrollments, exam_sessions   -- reuses meetings table + Meeting Core
 - `audit_logs (meeting_id, created_at)`
 - `meeting_invites (meeting_id, email)` (unique)
 - `proctor_events (meeting_id, created_at)`, `proctor_events (meeting_id, user_id)` — report queries
+- `stored_files (meeting_id, created_at)`, `stored_files (retention_expires_at)`,
+  partial-unique `stored_files (proctor_event_id) WHERE proctor_event_id IS NOT NULL AND deleted_at IS NULL`
 
 ## Redis keyspace
 

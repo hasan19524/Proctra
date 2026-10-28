@@ -555,3 +555,50 @@ lazily (only the variant it needs). The score is never client-authoritative,
 so tampering with the JS changes observations, not grades - and a determined
 student can still evade an on-device detector, which is a known limit of any
 client-side proctoring, not a defect of this design.
+
+## D24 - Object storage: provider-independent abstraction, MinIO dev / R2 prod
+
+**Context.** Evidence clips, student screenshots, and meeting attachments need
+durable binary storage. Tests and local demonstrations must run with no cloud
+credentials, subscriptions, or internet access (D10's self-contained dev
+environment), while cloud deployment needs a managed private store with
+server-side authorization. Binding business logic to either vendor would make
+the other environment untestable.
+
+**Decision.**
+- The backend talks to a single `ObjectStorage` ABC (`app/storage/base.py`:
+  put / stat / exists / open (Range) / delete / presign, plus idempotent
+  ensure-bucket) and never imports a concrete provider outside that package.
+- Two S3-compatible providers share one wire implementation
+  (`S3CompatibleStorage`): `MinIOStorage` (path-style, plain HTTP,
+  localhost:9000, a Docker Compose service) and `R2Storage` (Cloudflare
+  virtual-hosted endpoint, region `auto`).
+  `STORAGE_PROVIDER=minio|r2` selects at startup; `build_storage()` validates
+  eagerly so the lifespan fails fast with a precise message (r2 without its
+  R2_* credentials, minio in production, empty endpoint). boto3 runs behind
+  `run_in_threadpool`, keeping storage I/O off the event loop.
+- PostgreSQL is the source of truth: `stored_files` holds purpose, MIME, size,
+  the storage *key* (never a provider URL), `upload_status`
+  (pending -> uploaded | failed, then missing -> deleted -> purged), the
+  retention deadline, and `legal_hold`. A partial unique index enforces one
+  active clip per proctoring event.
+- Reads are proxied through the backend by default: server-side authorization
+  on every request (owner or host), Range support for video seeking, an audit
+  row per access, and the strict CSP untouched. Short-lived presigned URLs
+  exist behind an authorized endpoint for API consumers; hold is host-only.
+- Uploads sniff magic bytes (the declared Content-Type is ignored), enforce
+  per-purpose caps (clip 50 MB, screenshot 10 MB, attachment 25 MB) behind a
+  Content-Length pre-check, and persist `failed` rows on storage errors so
+  reports show gaps honestly instead of pretending they never happened.
+  The retention sweep (background loop, sleep-first) purges expired files but
+  skips `legal_hold`; deletion tombstones the row and removes the object,
+  with the sweep retrying any failed removal.
+
+**Consequences.** Development and tests need only `docker compose up -d
+minio` - no Cloudflare account, credentials, or internet - and the identical
+code path runs against R2 in production by flipping environment variables.
+Switching providers later is an object migration (`aws s3 sync`), not a code
+change, because records store keys rather than URLs. MinIO CE is end-of-life
+and its Docker Hub image was deleted (Sept 2026), so compose pins
+`bitnamilegacy/minio`, the last anonymously pullable image of the AGPL server;
+the abstraction means replacing that image later is a one-line compose change.

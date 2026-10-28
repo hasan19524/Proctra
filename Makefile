@@ -18,7 +18,7 @@ setup: ## Install backend + frontend dependencies and run migrations
 	cp -n .env.example .env || true
 	cd backend && uv run alembic upgrade head
 
-infra-up: ## Start infrastructure containers (postgres, redis, livekit)
+infra-up: ## Start infrastructure containers (postgres, redis, livekit, minio)
 	docker compose up -d
 
 infra-down: ## Stop infrastructure containers (keeps volumes)

@@ -32,6 +32,9 @@ Edit `.env` and set **production values**:
 | `FRONTEND_URL` | `https://procto.example.com` |
 | `TRUSTED_HOSTS` | comma list of hostnames, e.g. `procto.example.com` |
 | `COOKIE_SECURE` | `true` |
+| `STORAGE_PROVIDER` | `r2` — the backend refuses to boot in production with `minio` |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | Cloudflare R2 credentials and private bucket (see *Object storage* below) |
+| `STORAGE_RETENTION_DAYS` | evidence retention (default `90`; `0` = keep forever) |
 | `NEXT_PUBLIC_API_URL` | leave empty (frontend proxies `/api` internally) |
 | `NEXT_PUBLIC_WS_URL` | `wss://procto.example.com` |
 | `DOMAIN` | `procto.example.com` (used by Caddy) |
@@ -112,6 +115,36 @@ any edge proxy: a policy of `camera=(), microphone=()` denies `getUserMedia` sit
 breaks every meeting, not just proctoring. Both the prejoin camera check and the
 proctoring engine require the origin to be allowed.
 
+## Object storage: Cloudflare R2 (evidence, screenshots)
+
+Production stores evidence in a **private** Cloudflare R2 bucket (DECISIONS.md D24);
+local development uses MinIO from `docker-compose.yml`. `STORAGE_PROVIDER` selects
+the provider and the backend **fails at startup** with a precise message if R2 is
+configured incompletely.
+
+Before the first production deployment:
+
+1. Create a private R2 bucket (e.g. `procto-evidence`) in the Cloudflare dashboard.
+2. Create an R2 API token scoped to that bucket (object read/write only) and put the
+   account id + token id/secret into `.env` as `R2_*` — server-side only, never in
+   Git and never exposed to the frontend.
+3. Start the stack; the first upload verifies connectivity end-to-end. Confirm the
+   bucket denies anonymous access and that signed URLs stay short-lived
+   (`STORAGE_SIGNED_URL_TTL_SECONDS`, default 300 s).
+4. Exercise upload, download (including Range reads), signed URL, and deletion
+   through the app against R2 before relying on it.
+5. Configure storage monitoring/usage alerts in Cloudflare (growth, error rate).
+6. Confirm `STORAGE_RETENTION_DAYS` matches policy (default 90 days; `0` = keep
+   forever). The backend sweeps expired files on that schedule and never removes
+   files under legal hold.
+7. Include the bucket in backup/replication alongside Postgres backups and verify
+   recovery (`aws s3 sync` works from both ends).
+8. Verify no development configuration leaked: `.env` must contain no `MINIO_*`
+   endpoints or `minioadmin` credentials, and the bucket must not be public.
+
+Switching providers later is an object migration (`aws s3 sync`), not a code
+change — the database stores object keys, never provider URLs.
+
 ## Security checklist before going live
 
 - [ ] `SECRET_KEY` is 32+ chars and unique.
@@ -125,6 +158,8 @@ proctoring engine require the origin to be allowed.
 - [ ] Database is not exposed on a public port (compose only exposes 80/443).
 - [ ] Edge proxy allows camera/microphone on the origin (`Permissions-Policy: camera=(self), microphone=(self)`).
 - [ ] `.wasm` is served with `Content-Type: application/wasm` (MediaPipe proctoring assets).
+- [ ] `STORAGE_PROVIDER=r2` with all four `R2_*` values set; R2 bucket is private and API-token-scoped.
+- [ ] No `MINIO_*` dev endpoints or `minioadmin` credentials in production env files.
 
 ## CI
 

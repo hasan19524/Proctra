@@ -72,6 +72,15 @@ services:
       LIVEKIT_URL: ws://livekit:7880
       TRUSTED_HOSTS: ${TRUSTED_HOSTS:-}
       COOKIE_SECURE: "true"
+      # Object storage (DECISIONS.md D24): production uses Cloudflare R2.
+      # Startup fails fast if the R2_* variables below are missing.
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      STORAGE_RETENTION_DAYS: ${STORAGE_RETENTION_DAYS:-90}
+      STORAGE_SIGNED_URL_TTL_SECONDS: ${STORAGE_SIGNED_URL_TTL_SECONDS:-300}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

@@ -55,6 +55,7 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for production deployment.
 | Cache / bus | Redis 7 |
 | Realtime (app) | WebSockets (FastAPI) |
 | Realtime (media) | WebRTC via **LiveKit** SFU |
+| Object storage | **MinIO** (dev/test) → **Cloudflare R2** (prod), one S3 abstraction (DECISIONS.md D24) |
 | Infra | Docker Compose (infra only), Make, Git |
 
 ## Documentation
@@ -76,7 +77,7 @@ Task runner: **PowerShell script** on Windows (`scripts/procto.ps1`), **Make** e
 ```powershell
 # Windows (PowerShell)
 ./scripts/procto.ps1 setup     # deps + .env + migrations
-./scripts/procto.ps1 infra up  # postgres + redis + livekit in Docker
+./scripts/procto.ps1 infra up  # postgres + redis + livekit + minio in Docker
 ./scripts/procto.ps1 dev       # backend :8001 + frontend :3001 (2 windows)
 ./scripts/procto.ps1 check     # lint + typecheck + tests
 ```
@@ -91,6 +92,7 @@ make check
 - Frontend: http://localhost:3001
 - Backend API: http://localhost:8001/api/health (docs: `/api/docs`)
 - LiveKit: http://localhost:7880 (dev key pair in `.env`)
+- MinIO console: http://localhost:9001 (`minioadmin` / `minioadmin`)
 
 ## License
 

@@ -1,0 +1,134 @@
+# Procto — production stack.
+#
+# Usage:
+#   cp .env .env.prod  (or set APP_ENV=production in .env)
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Services: postgres, redis, livekit (media), backend (FastAPI), frontend (Next.js),
+#           caddy (reverse proxy, auto-HTTPS).
+name: procto-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-procto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production}
+      POSTGRES_DB: ${POSTGRES_DB:-procto}
+    volumes:
+      - procto-pgdata-prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-procto} -d $${POSTGRES_DB:-procto}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [procto]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-}"]
+    volumes:
+      - procto-redis-prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [procto]
+
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit/livekit.yaml:ro
+    networks: [procto]
+    # In production, prefer exposing the media ports at the host/edge.
+
+  migrate:
+    build:
+      context: ./backend
+    entrypoint: ["alembic", "upgrade", "head"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-procto}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-procto}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [procto]
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+    env_file: .env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-procto}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-procto}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      LIVEKIT_URL: ws://livekit:7880
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-}
+      COOKIE_SECURE: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      livekit: { condition: service_started }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks: [procto]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+    env_file: .env
+    environment:
+      API_INTERNAL_URL: http://backend:8001
+      NODE_ENV: production
+    depends_on:
+      backend: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks: [procto]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks: [procto]
+
+volumes:
+  procto-pgdata-prod:
+  procto-redis-prod:
+  caddy-data:
+  caddy-config:
+
+networks:
+  procto:
+    driver: bridge

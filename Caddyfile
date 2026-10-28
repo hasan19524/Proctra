@@ -1,0 +1,25 @@
+# Procto — Caddy reverse proxy (auto-HTTPS via Let's Encrypt).
+#
+# Set the DOMAIN env var (or replace {$DOMAIN}) before running:
+#   DOMAIN=procto.example.com docker compose -f docker-compose.prod.yml up -d
+#
+# Routes /api/* (incl. WebSocket upgrades) to the FastAPI backend and
+# everything else to the Next.js frontend.
+
+{$DOMAIN:localhost} {
+    # Security headers (defence in depth; FastAPI also sets these).
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+        -Server
+    }
+
+    # API + WebSocket -> backend (Caddy upgrades WS automatically).
+    @api path /api/*
+    reverse_proxy @api backend:8001
+
+    # Everything else -> frontend.
+    reverse_proxy frontend:3001
+}

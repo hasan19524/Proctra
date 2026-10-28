@@ -5,7 +5,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup dev dev-backend dev-frontend dev-full infra-up infra-down \
-        db-upgrade db-revision test lint typecheck check fmt
+        db-upgrade db-revision test lint typecheck check fmt \
+        prod-up prod-down prod-logs prod-migrate
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -54,6 +55,18 @@ typecheck: ## Backend + frontend type checking
 	cd frontend && npm run typecheck
 
 check: lint typecheck test ## lint + typecheck + tests
+
+prod-up: ## Start the full production stack (docker-compose.prod.yml)
+	docker compose -f docker-compose.prod.yml up -d --build
+
+prod-down: ## Stop the production stack (keeps volumes)
+	docker compose -f docker-compose.prod.yml down
+
+prod-logs: ## Tail production logs
+	docker compose -f docker-compose.prod.yml logs -f --tail=100
+
+prod-migrate: ## Run pending Alembic migrations in production
+	docker compose -f docker-compose.prod.yml run --rm migrate
 
 fmt: ## Auto-fix formatting on both sides
 	cd backend && uv run ruff check --fix . && uv run ruff format .

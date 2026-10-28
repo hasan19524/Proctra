@@ -36,6 +36,7 @@ ML Proctoring Engine.
 Phase 0 — Architecture & project foundation.
 
 See [DEVELOPMENT.md](./DEVELOPMENT.md) for the phase checklist.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for production deployment.
 
 ## Tech stack
 

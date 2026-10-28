@@ -852,7 +852,7 @@ export default function DesignPage() {
         <header className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <Button variant="ghost" size="sm" render={<Link href="/" />}>
+              <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/" />}>
                 <HomeIcon data-icon="inline-start" />
                 Home
               </Button>

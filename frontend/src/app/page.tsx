@@ -9,8 +9,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleHelpIcon,
-  GraduationCapIcon,
-  PaletteIcon,
   SettingsIcon,
   VideoIcon,
 } from "lucide-react";
@@ -34,8 +32,6 @@ import { cn } from "cn";
 
 const NAV_ITEMS = [
   { label: "Meetings", icon: CalendarDaysIcon, href: "/" },
-  { label: "Exams", icon: GraduationCapIcon, href: "#exams" },
-  { label: "Design", icon: PaletteIcon, href: "/design" },
 ] as const;
 
 const WEEKDAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];

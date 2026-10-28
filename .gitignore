@@ -40,7 +40,9 @@ next-env.d.ts
 coverage/
 coverage.xml
 
-# ---- Local data ----
-*.log
-tmp/
-.DS_Store
+# ---- Next.js agent files (auto-generated) ----
+AGENTS.md
+CLAUDE.md
+
+# ---- Playwright CLI artifacts ----
+.playwright-cli/

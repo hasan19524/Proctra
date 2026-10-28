@@ -11,10 +11,10 @@ load the same values as commands run from the root.
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # backend/app/core/config.py -> repository root
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -34,6 +34,22 @@ _DEV_SECRETS = frozenset(
 # excludes ``none`` (which PyJWT accepts when explicitly listed) — a typo in
 # JWT_ALGORITHM must not mint universally-valid unsigned tokens.
 _ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512", "RS256", "ES256"})
+
+
+def _parse_env_str_list(value: object) -> object:
+    """Normalise a list setting arriving as a string.
+
+    Accepts '' (Docker Compose passes it for unset `${VAR:-}` substitutions),
+    a JSON list, or a comma-separated list; anything else passes through.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            return json.loads(text)
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return value
 
 
 class Settings(BaseSettings):
@@ -69,17 +85,27 @@ class Settings(BaseSettings):
 
     # ---- LiveKit (SFU) ----
     livekit_url: str = Field(default="ws://localhost:7880", alias="LIVEKIT_URL")
+    # Browser-facing SFU URL handed out by the token endpoint. In production
+    # LIVEKIT_URL is rewritten to the internal Docker service
+    # (ws://livekit:7880) for server-side room admin — a URL no browser can
+    # resolve — so browsers must get this public one instead. Unset = fall
+    # back to livekit_url (correct for local dev where they are the same).
+    livekit_public_url: str | None = Field(default=None, alias="LIVEKIT_PUBLIC_URL")
     livekit_api_key: str = Field(default="procto-dev-key", alias="LIVEKIT_API_KEY")
     livekit_api_secret: str = Field(default="procto-dev-secret", alias="LIVEKIT_API_SECRET")
 
     # ---- CORS / Security ----
-    backend_cors_origins: list[str] = Field(
+    # `NoDecode` hands the raw string to the validator below: without it
+    # pydantic-settings tries json.loads on every env value for these list
+    # fields and raises SettingsError on '' or a comma list (this crashed the
+    # production compose, which passes `TRUSTED_HOSTS: ${TRUSTED_HOSTS:-}`).
+    backend_cors_origins: Annotated[list[str], NoDecode] = Field(
         default=["http://localhost:3001", "http://localhost:3000"],
         alias="BACKEND_CORS_ORIGINS",
     )
     frontend_url: str = Field(default="http://localhost:3001", alias="FRONTEND_URL")
     # Empty by default: only enable TrustedHostMiddleware with explicit hosts.
-    trusted_hosts: list[str] = Field(default=[], alias="TRUSTED_HOSTS")
+    trusted_hosts: Annotated[list[str], NoDecode] = Field(default=[], alias="TRUSTED_HOSTS")
     # Refresh cookie `Secure` flag (SECURITY.md §1). Kept independent of APP_ENV
     # so a mis-set environment cannot silently downgrade the cookie to HTTP.
     # `None` means "follow the environment" (secure in production, off in dev
@@ -115,12 +141,13 @@ class Settings(BaseSettings):
     @classmethod
     def _split_cors(cls, value: object) -> object:
         """Accept either a JSON list or a comma-separated string."""
-        if isinstance(value, str):
-            text = value.strip()
-            if text.startswith("["):
-                return json.loads(text)
-            return [part.strip() for part in text.split(",") if part.strip()]
-        return value
+        return _parse_env_str_list(value)
+
+    @field_validator("trusted_hosts", mode="before")
+    @classmethod
+    def _split_hosts(cls, value: object) -> object:
+        """Accept '', a JSON list, or a comma-separated string (see NoDecode)."""
+        return _parse_env_str_list(value)
 
     @field_validator("backend_cors_origins", mode="after")
     @classmethod

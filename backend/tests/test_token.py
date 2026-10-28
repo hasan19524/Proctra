@@ -52,6 +52,19 @@ class TestMintToken:
         assert grants["canPublish"] is True
         assert grants["canSubscribe"] is True
 
+    async def test_public_url_is_handed_to_browsers(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Production rewrites LIVEKIT_URL to the internal service name; the
+        browser must receive LIVEKIT_PUBLIC_URL instead (DEPLOYMENT.md §2)."""
+        monkeypatch.setattr(settings, "livekit_public_url", "wss://media.procto.dev")
+        host = await _register(client, "lhost5@procto.dev", "Live Host 5")
+        meeting = await _create_meeting(client, host["access_token"])
+
+        status_code, body = await _mint(client, host["access_token"], meeting["code"])
+        assert status_code == 200
+        assert body["url"] == "wss://media.procto.dev"
+
     async def test_requires_auth_and_unknown_codes_404(self, client: AsyncClient) -> None:
         host = await _register(client, "lhost2@procto.dev", "Live Host 2")
         meeting = await _create_meeting(client, host["access_token"])

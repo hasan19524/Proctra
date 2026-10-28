@@ -26,6 +26,21 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6380:6379
+      # Local object storage for the Phase 17 evidence tests (D24 §7): the same
+      # image docker-compose.yml runs. Tests skip gracefully when it is absent,
+      # but here we run them for real.
+      minio:
+        image: bitnamilegacy/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -50,9 +65,12 @@ jobs:
       - name: Lint (ruff)
         working-directory: backend
         run: uv run ruff check .
+      - name: Format check (ruff)
+        working-directory: backend
+        run: uv run ruff format --check .
       - name: Type check (mypy)
         working-directory: backend
-        run: uv run mypy app
+        run: uv run mypy app tests
       - name: Tests (pytest)
         working-directory: backend
         env:
@@ -80,6 +98,12 @@ jobs:
       - name: Lint (eslint)
         working-directory: frontend
         run: npm run lint
+      - name: Type check (tsc)
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Format check (prettier)
+        working-directory: frontend
+        run: npm run format:check
       - name: Tests (vitest)
         working-directory: frontend
         run: npm test

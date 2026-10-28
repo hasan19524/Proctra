@@ -164,7 +164,12 @@ async def mint_livekit_token(
             )
         )
     )
-    return LiveKitTokenOut(url=settings.livekit_url, token=token.to_jwt())
+    # Browsers need a reachable URL; the server-side admin client (sfu_service)
+    # keeps using the internal LIVEKIT_URL.
+    return LiveKitTokenOut(
+        url=settings.livekit_public_url or settings.livekit_url,
+        token=token.to_jwt(),
+    )
 
 
 async def _require_host_report(code: str, user: User, session: AsyncSession) -> Meeting:

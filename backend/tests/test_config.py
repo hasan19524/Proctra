@@ -90,3 +90,27 @@ def test_jwt_algorithm_allowlist_accepts_hs256() -> None:
 
 def test_trusted_hosts_defaults_empty() -> None:
     assert Settings(_env_file=None).trusted_hosts == []
+
+
+def test_trusted_hosts_env_empty_string_from_docker_substitution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`TRUSTED_HOSTS: ${TRUSTED_HOSTS:-}` in compose passes '' through the
+    environment; it must parse to [] instead of crashing startup (SettingsError)."""
+    monkeypatch.setenv("TRUSTED_HOSTS", "")
+    assert Settings(_env_file=None).trusted_hosts == []
+
+
+def test_trusted_hosts_env_comma_separated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRUSTED_HOSTS", "procto.example.com, api.procto.dev")
+    assert Settings(_env_file=None).trusted_hosts == ["procto.example.com", "api.procto.dev"]
+
+
+def test_trusted_hosts_env_json_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRUSTED_HOSTS", '["procto.example.com"]')
+    assert Settings(_env_file=None).trusted_hosts == ["procto.example.com"]
+
+
+def test_cors_origins_env_empty_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BACKEND_CORS_ORIGINS", "")
+    assert Settings(_env_file=None).backend_cors_origins == []

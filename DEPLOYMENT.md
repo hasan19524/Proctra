@@ -28,6 +28,7 @@ Edit `.env` and set **production values**:
 | `POSTGRES_PASSWORD` | strong password |
 | `REDIS_PASSWORD` | strong password (or leave empty to disable auth) |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | must match `livekit/livekit.yaml` `keys:` |
+| `LIVEKIT_PUBLIC_URL` | browser-reachable SFU URL, e.g. `wss://procto.example.com` — inside the compose network the backend hands browsers `LIVEKIT_URL` (`ws://livekit:7880`), which they cannot resolve, so this must be the public endpoint (see *LiveKit* below) |
 | `BACKEND_CORS_ORIGINS` | JSON list of your frontend origin(s), e.g. `["https://procto.example.com"]` |
 | `FRONTEND_URL` | `https://procto.example.com` |
 | `TRUSTED_HOSTS` | comma list of hostnames, e.g. `procto.example.com` |
@@ -47,16 +48,44 @@ The backend refuses to boot in production with dev secrets or `APP_DEBUG=true`
 Edit `livekit/livekit.yaml` and set `keys:` to match `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`.
 Also configure `rtc.port_range` and the public IP for WebRTC (see LiveKit docs).
 
+The URL split:
+
+- **`LIVEKIT_URL`** — inside the compose network the backend talks to the SFU at
+  `ws://livekit:7880` (server-side room admin, token minting). The compose file
+  sets this for you; do not expose it publicly.
+- **`LIVEKIT_PUBLIC_URL`** — what browsers actually connect to. Browsers cannot
+  resolve the Docker service name `livekit`, so leaving this unset in production
+  makes every call join fail. Point it at a reachable endpoint: either front
+  LiveKit with Caddy on the same domain (add a `/rtc` + WebSocket route) or
+  expose the LiveKit ports on the host/edge and use `ws(s)://<host>:7880`.
+
+WebRTC media also needs UDP. If you set `rtc.port_range` in `livekit.yaml`, that
+whole range must be reachable by clients (published at the host or load
+balancer); otherwise audio/video falls back to TCP relay or fails outright.
+
 ## 3. Build and start
 
+Everything comes from one env file. Either edit `.env` in place (§1), or keep
+`.env.prod` separately — it must name itself (`COMPOSE_ENV_FILE=.env.prod` as
+its last line) so the services load the same file the flags substitute from:
+
 ```bash
-make prod-up
-# or:
+# Edit .env in place:
 docker compose -f docker-compose.prod.yml up -d --build
+
+# Or use a separate .env.prod (add `COMPOSE_ENV_FILE=.env.prod` to it):
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 ```
 
+> Do not rely on a `COMPOSE_ENV_FILE` **shell** variable: Compose uses
+> `--env-file` (or the default `.env`) for `${VAR}` substitution, so a shell
+> variable alone lets `R2_*`, `SECRET_KEY`, and friends silently fall back to
+> the dev `.env`.
+
 This starts Postgres, Redis, LiveKit, runs Alembic migrations (`migrate` service),
-then starts the backend, frontend, and Caddy.
+then starts the backend, frontend, and Caddy. The backend refuses to start if
+secrets are dev defaults, `APP_DEBUG=true`, or R2 storage is unconfigured — by
+design; fix the reported variables and re-run `up -d`.
 
 ## 4. Verify
 

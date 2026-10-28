@@ -9,10 +9,12 @@ and the audit trail.
 """
 
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import httpx
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
@@ -33,6 +35,7 @@ from app.storage import (
     get_storage,
     storage_dep,
 )
+from tests.conftest import skip_without_minio
 from tests.test_exam_proctoring import _create_exam
 from tests.test_ws import _register
 
@@ -40,6 +43,13 @@ from tests.test_ws import _register
 PNG = b"\x89PNG\r\n\x1a\n" + b"procto-png" * 16
 WEBM = b"\x1a\x45\xdf\xa3" + b"procto-webm" * 16
 TXT = b"just some text without any magic bytes"
+
+
+@pytest.fixture(autouse=True)
+async def _requires_minio() -> AsyncIterator[None]:
+    """Every test here uploads real bytes (D24 Phase A) — skip without MinIO."""
+    await skip_without_minio()
+    yield
 
 
 def _auth(token: str) -> dict[str, str]:

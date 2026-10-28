@@ -28,6 +28,24 @@ from alembic import command  # noqa: E402
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+async def skip_without_minio() -> None:
+    """Skip a storage-integration test when the local MinIO (Docker) is down.
+
+    Phase 17 (DECISIONS.md D24 §7) evidence tests exercise the real MinIO from
+    `docker compose up -d minio`. On machines without it the suite skips with a
+    clear reason instead of a wall of connection errors; CI runs the MinIO
+    service so the tests actually execute there.
+    """
+    from app.core.config import get_settings
+    from app.storage import build_storage
+    from app.storage.base import StorageUnavailableError
+
+    try:
+        await build_storage(get_settings()).ensure_bucket()
+    except StorageUnavailableError:
+        pytest.skip("local MinIO not reachable — run `docker compose up -d minio`")
+
+
 def _ensure_test_database() -> None:
     """Create the test database if it does not exist yet."""
 

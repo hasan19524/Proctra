@@ -40,6 +40,7 @@ from app.storage import (
     StorageConfigError,
     build_storage,
 )
+from tests.conftest import skip_without_minio
 
 # Strong secrets so production-shaped Settings pass the production validators.
 _PROD_SECRETS: dict[str, Any] = {
@@ -167,6 +168,7 @@ class TestValidationHelpers:
 @pytest.fixture
 async def storage() -> AsyncIterator[MinIOStorage]:
     """Real MinIO provider (local Docker) with the bucket ensured."""
+    await skip_without_minio()
     store = build_storage(settings)
     assert isinstance(store, MinIOStorage)
     await store.ensure_bucket()

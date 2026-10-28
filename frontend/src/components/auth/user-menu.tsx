@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-import { LogOutIcon } from "lucide-react";
+import { LogOutIcon, UserIcon } from "lucide-react";
 
 import { useSession } from "@/components/auth/session-context";
 import { Button } from "@/components/ui/button";
@@ -64,6 +64,10 @@ export function UserMenu() {
           <span className="text-muted-foreground text-xs font-normal">{user.email}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => router.push("/profile")}>
+          <UserIcon data-icon="inline-start" />
+          Profile
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => void onSignOut()}>
           <LogOutIcon data-icon="inline-start" />
           Sign out

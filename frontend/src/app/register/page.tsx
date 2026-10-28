@@ -78,7 +78,7 @@ export default function RegisterPage() {
   return (
     <main className="bg-background text-foreground flex min-h-svh">
       {/* Brand panel */}
-      <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-violet-600 via-fuchsia-600 to-rose-500 p-10 text-white lg:flex">
+      <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-teal-700 via-amber-500 to-rose-500 p-10 text-white lg:flex">
         <div
           aria-hidden="true"
           className="absolute inset-0 opacity-30"

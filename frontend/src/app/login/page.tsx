@@ -70,7 +70,7 @@ export default function LoginPage() {
   return (
     <main className="bg-background text-foreground flex min-h-svh">
       {/* Brand panel */}
-      <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 p-10 text-white lg:flex">
+      <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-teal-700 via-emerald-600 to-amber-500 p-10 text-white lg:flex">
         <div
           aria-hidden="true"
           className="absolute inset-0 opacity-30"

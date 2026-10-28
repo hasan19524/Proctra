@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -59,10 +60,12 @@ export function UserMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-56">
-        <DropdownMenuLabel className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">{user.display_name}</span>
-          <span className="text-muted-foreground text-xs font-normal">{user.email}</span>
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium">{user.display_name}</span>
+            <span className="text-muted-foreground text-xs font-normal">{user.email}</span>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push("/profile")}>
           <UserIcon data-icon="inline-start" />

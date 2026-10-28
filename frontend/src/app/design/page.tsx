@@ -69,6 +69,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -602,7 +603,9 @@ function OverlaysSection() {
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="outline">Open menu</Button>} />
           <DropdownMenuContent>
-            <DropdownMenuLabel>Meeting</DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Meeting</DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuItem onClick={() => toast.add({ type: "info", title: "Mute all" })}>
               Mute everyone
             </DropdownMenuItem>

@@ -157,7 +157,7 @@ export default function Home() {
             <Button variant="ghost" size="icon" aria-label="Help">
               <CircleHelpIcon />
             </Button>
-            <Button variant="ghost" size="icon" aria-label="Settings">
+            <Button variant="ghost" size="icon" aria-label="Settings" onClick={() => router.push("/settings")}>
               <SettingsIcon />
             </Button>
             <ThemeToggle />

@@ -25,6 +25,7 @@ from app.db import SessionLocal
 from app.models.meeting import Meeting
 from app.models.message import MAX_BODY_LENGTH
 from app.models.note import MAX_NOTE_CONTENT_CHARS, VISIBILITIES, VISIBILITY_HOST_ONLY
+from app.models.proctor import SIGNAL_TYPES
 from app.models.user import User
 from app.services import sfu_service
 from app.services.audit_service import audit
@@ -42,6 +43,7 @@ from app.services.message_service import (
 )
 from app.services.note_service import list_notes, note_dto, upsert_note
 from app.services.participant_service import record_join, record_leave
+from app.services.proctor_service import flag_out, list_recent_flags, record_event
 from app.ws import presence
 from app.ws.envelope import (
     CLOSE_FORBIDDEN,
@@ -147,6 +149,17 @@ def _is_host_only_note(frame_text: str) -> bool:
     return isinstance(payload, dict) and payload.get("visibility") == VISIBILITY_HOST_ONLY
 
 
+def _is_host_only_frame(frame_text: str) -> bool:
+    """True when a broadcast frame must never reach a non-host connection.
+
+    Covers host-only notes (Phase 7) and proctoring flag fan-out (Phase 16 —
+    a student's cheating score is private to the host, never broadcast).
+    """
+    if '"proctor.flag"' in frame_text:
+        return True
+    return _is_host_only_note(frame_text)
+
+
 def _frame_type(frame_text: str) -> str | None:
     """Best-effort event type of a serialized frame (malformed -> None)."""
     try:
@@ -159,7 +172,7 @@ def _frame_type(frame_text: str) -> str | None:
 
 async def _deliver(conn: "LocalConnection", frame_text: str) -> None:
     """Send one broadcast frame to a local connection, honoring visibility."""
-    if _is_host_only_note(frame_text) and not conn.is_host:
+    if _is_host_only_frame(frame_text) and not conn.is_host:
         return
     if conn.waiting and _frame_type(frame_text) not in WAITING_VISIBLE_FRAMES:
         return
@@ -188,7 +201,7 @@ async def _relay(websocket: WebSocket, meeting_code: str, conn_id: str, pubsub: 
             conn = get_registry().get(conn_id)
             if conn is None or conn.closed:
                 break
-            if _is_host_only_note(data) and not conn.is_host:
+            if _is_host_only_frame(data) and not conn.is_host:
                 continue
             if conn.waiting and _frame_type(data) not in WAITING_VISIBLE_FRAMES:
                 continue
@@ -207,26 +220,32 @@ async def _snapshot(meeting_code: str, meeting: Meeting, user_id: str) -> str:
         row = await session.get(Meeting, meeting.id)
         recent = await list_recent_messages(session, meeting.id)
         notes = await list_notes(session, meeting.id, include_host_only=is_host)
+        proctor_rows = await list_recent_flags(session, meeting.id, limit=200) if is_host else []
     current = row or meeting  # re-read so lock/permission changes are visible
-    return server_frame(
-        "sync.state",
-        {
-            "meeting": {
-                "code": current.code,
-                "title": current.title,
-                "status": current.status,
-                "is_locked": current.is_locked,
-                "allow_chat": current.allow_chat,
-                "allow_reactions": current.allow_reactions,
-                "allow_screen_share": current.allow_screen_share,
-            },
-            "self": {"user_id": user_id},
-            "participants": participants,
-            "messages": [message_dto(message, sender) for message, sender in recent],
-            "notes": [note_dto(note, name) for note, name in notes],
-            "seq": await current_seq(meeting_code),
+    payload: dict[str, Any] = {
+        "meeting": {
+            "code": current.code,
+            "title": current.title,
+            "status": current.status,
+            "kind": current.kind,
+            "is_locked": current.is_locked,
+            "allow_chat": current.allow_chat,
+            "allow_reactions": current.allow_reactions,
+            "allow_screen_share": current.allow_screen_share,
+            "proctoring_enabled": current.proctoring_enabled,
         },
-    )
+        "self": {"user_id": user_id},
+        "participants": participants,
+        "messages": [message_dto(message, sender) for message, sender in recent],
+        "notes": [note_dto(note, name) for note, name in notes],
+        "seq": await current_seq(meeting_code),
+    }
+    if is_host and proctor_rows:
+        # Host-only: recent proctoring flags so a late-joining host sees history.
+        payload["proctor_flags"] = [
+            flag_out(event, name).model_dump(mode="json") for event, name in proctor_rows
+        ]
+    return server_frame("sync.state", payload)
 
 
 async def _replay_chat(websocket: WebSocket, meeting: Meeting, last_seq: int) -> None:
@@ -408,6 +427,75 @@ async def _handle_note_save(
     await _broadcast(
         meeting_code,
         server_frame("note.updated", note_dto(note, user.display_name)),
+    )
+
+
+# Proctor events per (user, meeting) per minute: bounds a tampered client
+# flooding fake flags without starving the 8 fps flood bucket.
+PROCTOR_RATE = (30, 60)
+
+
+async def _handle_proctor_event(
+    websocket: WebSocket,
+    meeting_code: str,
+    meeting: Meeting,
+    user: User,
+    frame: Any,
+) -> None:
+    """Persist one proctoring observation and fan the flag out to the host.
+
+    The sender is always the subject — a client can never flag another user.
+    Points and the meeting minute are computed server-side (proctor_service),
+    never taken from the client. Hosts are exempt: the vision model only
+    watches participants, not the proctor.
+    """
+    if meeting.kind != "exam" or not meeting.proctoring_enabled:
+        await _send_ws_error(websocket, "not_proctored", "This meeting is not a proctored exam")
+        return
+    if str(meeting.host_id) == str(user.id):
+        # The host is the proctor, not a subject; silently ignore.
+        return
+
+    payload = frame.payload if isinstance(frame.payload, dict) else {}
+    signal = payload.get("signal")
+    if not isinstance(signal, str) or signal not in SIGNAL_TYPES:
+        await _send_ws_error(websocket, "invalid_signal", "Unknown proctor signal")
+        return
+
+    try:
+        await rate_limit("proctor_event", f"{user.id}:{meeting_code}", *PROCTOR_RATE)
+    except HTTPException:
+        await _send_ws_error(
+            websocket, "rate_limited", "Too many proctoring events", retryable=True
+        )
+        return
+
+    try:
+        async with SessionLocal() as session:
+            event = await record_event(
+                session,
+                meeting=meeting,
+                user=user,
+                signal=signal,
+                duration_s=payload.get("duration_s", 0.0),
+                detail=payload.get("detail"),
+            )
+            await session.commit()
+    except Exception:
+        await _send_ws_error(
+            websocket,
+            "internal_error",
+            "Could not record the proctoring event",
+            retryable=True,
+        )
+        return
+
+    await _broadcast(
+        meeting_code,
+        server_frame(
+            "proctor.flag",
+            flag_out(event, user.display_name).model_dump(mode="json"),
+        ),
     )
 
 
@@ -999,6 +1087,8 @@ async def _serve(
             await _handle_note_save(websocket, meeting_code, meeting, user, frame)
         elif frame.type == "reaction.send":
             await _handle_reaction_send(websocket, meeting_code, meeting, user, frame)
+        elif frame.type == "proctor.event":
+            await _handle_proctor_event(websocket, meeting_code, meeting, user, frame)
         elif frame.type == "host.action":
             await _handle_host_action(websocket, meeting_code, meeting, user, frame, conn)
         else:

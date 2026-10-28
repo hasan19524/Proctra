@@ -30,10 +30,25 @@ export interface MeetingMeta {
   code: string;
   title: string;
   status: string;
+  kind: "standard" | "exam";
   is_locked: boolean;
   allow_chat: boolean;
   allow_reactions: boolean;
   allow_screen_share: boolean;
+  proctoring_enabled: boolean;
+}
+
+/** One proctoring flag in the host's live integrity feed (host-only). */
+export interface ProctorFlag {
+  id: string;
+  user_id: string;
+  name: string;
+  signal: string;
+  label: string;
+  points: number;
+  minute: number;
+  duration_s: number;
+  created_at: string;
 }
 
 export type NoteVisibility = "all" | "host_only";
@@ -63,6 +78,7 @@ interface SyncStatePayload {
   messages?: WsChatMessage[];
   meeting?: MeetingMeta;
   notes?: WsNote[];
+  proctor_flags?: ProctorFlag[];
 }
 
 interface PresenceStatePayload {
@@ -138,6 +154,7 @@ export function useMeetingWs(code: string | null, password?: string) {
   const [isWaiting, setIsWaiting] = React.useState(false);
   const [isRejected, setIsRejected] = React.useState(false);
   const [pendingJoins, setPendingJoins] = React.useState<Array<{ user_id: string; name: string }>>([]);
+  const [proctorFlags, setProctorFlags] = React.useState<ProctorFlag[]>([]);
   const socketRef = React.useRef<MeetingSocket | null>(null);
   // The self id arrives with sync.state, but frames can reference it first;
   // a ref lets early events match without re-subscribing the socket.
@@ -168,6 +185,9 @@ export function useMeetingWs(code: string | null, password?: string) {
         if (Array.isArray(payload?.notes)) setNotes(payload.notes);
         if (Array.isArray(payload?.messages) && payload.messages.length > 0) {
           setMessages((current) => upsertMessages(current, payload.messages ?? []));
+        }
+        if (Array.isArray(payload?.proctor_flags)) {
+          setProctorFlags(payload.proctor_flags);
         }
       }),
       socket.on<PresenceStatePayload>("presence.state", (payload) => {
@@ -278,6 +298,15 @@ export function useMeetingWs(code: string | null, password?: string) {
             .slice(-REACTION_MAX_KEPT),
         );
       }),
+      // Phase 16 — host-only proctoring flag fan-out. Students never receive
+      // this frame; the server filters it to the host connection.
+      socket.on<ProctorFlag>("proctor.flag", (payload) => {
+        if (!payload || typeof payload.id !== "string") return;
+        setProctorFlags((current) => {
+          if (current.some((flag) => flag.id === payload.id)) return current;
+          return [...current, payload];
+        });
+      }),
     ];
 
     socket.connect();
@@ -315,9 +344,22 @@ export function useMeetingWs(code: string | null, password?: string) {
   }, []);
 
   /**
-   * Send a chat message. Returns the idempotency key when queued/sent, or
-   * `null` when the socket is closed or the text is blank.
+   * Send one proctoring observation to the server (Phase 16 — exam mode).
+   * The server validates the signal, assigns points, stamps the meeting
+   * minute, persists the row, and fans the flag out to the host. A client
+   * never supplies its own score.
    */
+  const sendProctorEvent = React.useCallback(
+    (signal: string, durationS = 0, detail?: Record<string, string | number | boolean>): string | null => {
+      const payload: Record<string, unknown> = { signal, duration_s: durationS };
+      if (detail && Object.keys(detail).length > 0) payload.detail = detail;
+      return socketRef.current?.send("proctor.event", payload) ?? null;
+    },
+    [],
+  );
+
+  /** Send a chat message. Returns the idempotency key when queued/sent, or
+   * `null` when the socket is closed or the text is blank. */
   const sendChat = React.useCallback((body: string): string | null => {
     const trimmed = body.trim();
     if (!trimmed) return null;
@@ -333,6 +375,7 @@ export function useMeetingWs(code: string | null, password?: string) {
     meeting,
     notes,
     reactions,
+    proctorFlags,
     isRemoved,
     selfMuteNonce,
     isWaiting,
@@ -343,5 +386,6 @@ export function useMeetingWs(code: string | null, password?: string) {
     sendHostAction,
     sendNoteSave,
     sendReaction,
+    sendProctorEvent,
   };
 }

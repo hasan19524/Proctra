@@ -1,8 +1,8 @@
-"""Meeting routes (Phases 3, 9, 13)."""
+"""Meeting routes (Phases 3, 9, 13, 16 — exam mode + proctor report)."""
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from livekit import api as livekit_api
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,8 +19,9 @@ from app.schemas.meeting import (
     LiveKitTokenRequest,
     MeetingHistoryOut,
     MeetingOut,
+    ReportOut,
 )
-from app.services import meeting_service
+from app.services import meeting_service, proctor_service
 from app.services.meeting_service import MeetingNotFoundError
 from app.ws.waiting import APPROVED, get_decision
 
@@ -59,7 +60,11 @@ async def create_meeting(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> MeetingOut:
-    """Start a new meeting hosted by the current user."""
+    """Start a new meeting hosted by the current user.
+
+    Phase 16: ``kind="exam"`` creates a proctored exam room (requires a
+    password; seeds the invite roster the report is graded against).
+    """
     await rate_limit("meeting_create", str(user.id), 20, 60)
     meeting = await meeting_service.create_meeting(
         session,
@@ -67,6 +72,9 @@ async def create_meeting(
         title=payload.title,
         password=payload.password,
         waiting_room=payload.waiting_room,
+        kind=payload.kind,
+        proctoring_enabled=payload.proctoring_enabled if payload.kind == "exam" else False,
+        invite_emails=payload.invite_emails,
     )
     await session.commit()
     return _meeting_out(meeting)
@@ -156,3 +164,54 @@ async def mint_livekit_token(
         )
     )
     return LiveKitTokenOut(url=settings.livekit_url, token=token.to_jwt())
+
+
+async def _require_host_report(code: str, user: User, session: AsyncSession) -> Meeting:
+    """Load a meeting and assert the caller is its host (report gate)."""
+    try:
+        meeting = await meeting_service.get_meeting_by_code(session, code)
+    except MeetingNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Meeting not found",
+        ) from exc
+    if str(meeting.host_id) != str(user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the host can access the report",
+        )
+    return meeting
+
+
+@router.get("/{code}/report", response_model=ReportOut)
+async def get_exam_report(
+    code: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> ReportOut:
+    """Full exam report: roster (present/absent) + per-student scores + events.
+
+    Host-only. Returns JSON for the UI's live integrity panel; use
+    ``GET /{code}/report.csv`` for the downloadable file.
+    """
+    await rate_limit("report_fetch", str(user.id), 30, 60)
+    meeting = await _require_host_report(code, user, session)
+    return await proctor_service.build_report(session, meeting)
+
+
+@router.get("/{code}/report.csv")
+async def download_exam_report_csv(
+    code: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Download the exam report as a CSV file the proctor can open in Excel."""
+    await rate_limit("report_fetch", str(user.id), 30, 60)
+    meeting = await _require_host_report(code, user, session)
+    report = await proctor_service.build_report(session, meeting)
+    csv_text = proctor_service.report_to_csv(report)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="procto-report-{meeting.code}.csv"'},
+    )

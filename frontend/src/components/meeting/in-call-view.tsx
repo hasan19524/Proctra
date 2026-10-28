@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
+import { ShieldAlertIcon } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ import type { MediaTile } from "@/hooks/use-livekit-room";
 import type {
   MeetingMeta,
   NoteVisibility,
+  ProctorFlag,
   WsChatMessage,
   WsNote,
   WsParticipant,
@@ -40,11 +42,13 @@ import {
   type ChatMessage,
   type PanelParticipant,
 } from "@/components/meeting/meeting-panels";
+import { IntegrityPanel, StudentProctorChip } from "@/components/meeting/proctor-panel";
 import { ParticipantTile } from "@/components/meeting/participant-tile";
 import { ReactionBar, REACTIONS } from "@/components/meeting/reaction-bar";
 import { MeetingTopBar } from "@/components/meeting/meeting-top-bar";
 import { TrackAudio, TrackVideo } from "@/components/meeting/track-media";
 import type { MeetingStatus } from "@/components/meeting/status-indicator";
+import type { ProctorStatus } from "@/lib/proctor/types";
 
 interface InCallViewProps {
   code: string;
@@ -75,6 +79,13 @@ interface InCallViewProps {
   onToggleMic: () => void;
   onToggleCamera: () => void;
   onLeave: () => void;
+  /** Phase 16 — exam mode. */
+  isExam?: boolean;
+  isHost?: boolean;
+  proctorFlags?: ProctorFlag[];
+  proctorStatus?: ProctorStatus;
+  proctorMessage?: string | null;
+  onRetryProctoring?: () => void;
 }
 
 function toPanelMessage(message: WsChatMessage): ChatMessage {
@@ -126,17 +137,23 @@ export function InCallView({
   onToggleMic,
   onToggleCamera,
   onLeave,
+  isExam = false,
+  isHost = false,
+  proctorFlags = [],
+  proctorStatus = "idle",
+  proctorMessage = null,
+  onRetryProctoring,
 }: InCallViewProps) {
   const now = useClock();
   const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   const [isReactionsOpen, setReactionsOpen] = React.useState(false);
-  const [panel, setPanel] = React.useState<"people" | "chat" | "notes" | null>(null);
+  const [panel, setPanel] = React.useState<"people" | "chat" | "notes" | "integrity" | null>(null);
   const [isDetailsOpen, setDetailsOpen] = React.useState(false);
   const [isEndOpen, setEndOpen] = React.useState(false);
   const [pinnedId, setPinnedId] = React.useState<string | null>(null);
 
-  const togglePanel = React.useCallback((next: "people" | "chat" | "notes") => {
+  const togglePanel = React.useCallback((next: "people" | "chat" | "notes" | "integrity") => {
     setPanel((current) => (current === next ? null : next));
   }, []);
 
@@ -351,8 +368,28 @@ export function InCallView({
             </p>
           )}
 
-          <footer className="flex flex-col items-center gap-2 pb-1">
+          <footer className="relative flex flex-col items-center gap-2 pb-1">
             <FloatingReactions reactions={reactions} />
+            {/* Phase 16 — student: always-visible proctoring indicator. */}
+            {isExam && !isHost ? (
+              <StudentProctorChip
+                status={proctorStatus}
+                message={proctorMessage}
+                onRetry={onRetryProctoring ?? (() => {})}
+              />
+            ) : null}
+            {/* Phase 16 — host: quick-open integrity panel. */}
+            {isExam && isHost ? (
+              <Button
+                variant={panel === "integrity" ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => togglePanel("integrity")}
+                className="bg-background/80 absolute top-0 right-0 backdrop-blur-sm"
+              >
+                <ShieldAlertIcon className="text-warning size-4" aria-hidden="true" />
+                Integrity ({proctorFlags.length})
+              </Button>
+            ) : null}
             {isReactionsOpen ? (
               <ReactionBar
                 onReact={(label) => {
@@ -482,6 +519,17 @@ export function InCallView({
                   });
                 }
               }}
+              className="h-full"
+            />
+          </div>
+        ) : null}
+
+        {panel === "integrity" && isExam && isHost ? (
+          <div className="w-96 max-w-full shrink-0">
+            <IntegrityPanel
+              flags={proctorFlags}
+              meetingCode={meetingCode}
+              onClose={() => setPanel(null)}
               className="h-full"
             />
           </div>

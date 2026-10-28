@@ -5,6 +5,7 @@ import * as React from "react";
 import { toast } from "@/components/ui/toast";
 import { useLiveKitRoom } from "@/hooks/use-livekit-room";
 import { useMeetingWs } from "@/hooks/use-meeting-ws";
+import { useProctoring } from "@/hooks/use-proctoring";
 import { InCallView } from "@/components/meeting/in-call-view";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -24,6 +25,10 @@ interface InCallSessionProps {
  * `presence.update` whenever they change (or after every reconnect, since the
  * server rebuilds presence on rejoin). Also renders terminal states — removed
  * by the host or the meet having ended — instead of the call shell.
+ *
+ * Phase 16: for students in a proctored exam, also runs the MediaPipe
+ * proctoring engine on the local camera and streams observations to the
+ * server; hosts receive the live flag feed and can download the report.
  */
 export function InCallSession({ code, displayName, micOn, cameraOn, password, onLeave }: InCallSessionProps) {
   const [isMicOn, setIsMicOn] = React.useState(micOn);
@@ -38,6 +43,7 @@ export function InCallSession({ code, displayName, micOn, cameraOn, password, on
     meeting,
     notes,
     reactions,
+    proctorFlags,
     isRemoved,
     selfMuteNonce,
     isWaiting,
@@ -48,6 +54,7 @@ export function InCallSession({ code, displayName, micOn, cameraOn, password, on
     sendHostAction,
     sendNoteSave,
     sendReaction,
+    sendProctorEvent,
   } = useMeetingWs(code, password);
 
   // Hand raise is server state: the flag round-trips through presence so
@@ -71,6 +78,32 @@ export function InCallSession({ code, displayName, micOn, cameraOn, password, on
     }
     mediaStatusRef.current = media.status;
   }, [media.status]);
+
+  // Phase 16 — proctoring: only non-host clients in a proctored exam run the
+  // vision engine; the server independently ignores host observations anyway.
+  const isExam = meeting?.kind === "exam" && meeting?.proctoring_enabled === true;
+  const shouldProctor = isExam && !isHost && !isWaiting && !isRejected && !isRemoved;
+  const proctoring = useProctoring({
+    active: shouldProctor,
+    cameraStream: null, // engine acquires its own; avoids coupling to LiveKit internals
+    sendEvent: (observation) => {
+      sendProctorEvent(observation.signal, observation.duration_s, observation.detail);
+    },
+  });
+
+  // Show a one-time toast when the engine fails so the student knows why.
+  const proctorErrShownRef = React.useRef(false);
+  React.useEffect(() => {
+    if (proctoring.status === "error" && proctoring.message && !proctorErrShownRef.current) {
+      proctorErrShownRef.current = true;
+      toast.add({
+        type: "error",
+        title: "Proctoring unavailable",
+        description: proctoring.message,
+      });
+    }
+    if (proctoring.status !== "error") proctorErrShownRef.current = false;
+  }, [proctoring.status, proctoring.message]);
 
   // Host muted me: turn the mic off locally (render-phase adjustment, the
   // documented React pattern for deriving state from a prop/event).
@@ -129,14 +162,7 @@ export function InCallSession({ code, displayName, micOn, cameraOn, password, on
     updateFlags({ mic_on: isMicOn, camera_on: isCameraOn });
   }, [status, isMicOn, isCameraOn, updateFlags]);
 
-  if (isRejected) {
-    return <RejectedScreen onLeave={onLeave} />;
-  }
-
-  if (isWaiting) {
-    return <WaitingScreen onLeave={onLeave} />;
-  }
-
+  // Terminal states — each rendered exactly once (was duplicated before Phase 16).
   if (isRejected) {
     return <RejectedScreen onLeave={onLeave} />;
   }
@@ -189,6 +215,12 @@ export function InCallSession({ code, displayName, micOn, cameraOn, password, on
       onToggleMic={() => setIsMicOn((on) => !on)}
       onToggleCamera={() => setIsCameraOn((on) => !on)}
       onLeave={onLeave}
+      isExam={isExam}
+      isHost={isHost}
+      proctorFlags={proctorFlags}
+      proctorStatus={proctoring.status}
+      proctorMessage={proctoring.message}
+      onRetryProctoring={proctoring.retry}
     />
   );
 }

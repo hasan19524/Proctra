@@ -10,6 +10,7 @@ import {
   ChevronRightIcon,
   CircleHelpIcon,
   SettingsIcon,
+  ShieldCheckIcon,
   VideoIcon,
 } from "lucide-react";
 
@@ -20,6 +21,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Empty,
   EmptyDescription,
@@ -47,6 +55,7 @@ export default function Home() {
   const [code, setCode] = React.useState("");
   const [isStarting, setIsStarting] = React.useState(false);
   const [recent, setRecent] = React.useState<MeetingHistoryItem[] | null>(null);
+  const [createOpen, setCreateOpen] = React.useState(false);
   const today = React.useMemo(() => new Date(), []);
 
   React.useEffect(() => {
@@ -79,10 +88,22 @@ export default function Home() {
     month: "short",
   });
 
-  const startMeet = async () => {
+  const startMeet = async (options?: {
+    kind?: "standard" | "exam";
+    title?: string;
+    password?: string;
+    waitingRoom?: boolean;
+    inviteEmails?: string[];
+  }) => {
     setIsStarting(true);
     try {
-      const meeting = await meetingsApi.create();
+      const meeting = await meetingsApi.create({
+        kind: options?.kind ?? "standard",
+        title: options?.title,
+        password: options?.password,
+        waitingRoom: options?.waitingRoom,
+        inviteEmails: options?.inviteEmails,
+      });
       router.push(`/room/${meeting.code}`);
     } catch (error) {
       toast.add({
@@ -143,7 +164,7 @@ export default function Home() {
           <div className="flex shrink-0 items-center gap-1">
             <Button
               variant="success"
-              onClick={() => void startMeet()}
+              onClick={() => setCreateOpen(true)}
               disabled={isStarting}
               className="hidden rounded-full sm:flex"
             >
@@ -295,7 +316,7 @@ export default function Home() {
 
                   <Button
                     variant="success"
-                    onClick={() => void startMeet()}
+                    onClick={() => setCreateOpen(true)}
                     disabled={isStarting}
                     className="mt-4 rounded-full"
                   >
@@ -311,7 +332,174 @@ export default function Home() {
             </section>
           </main>
         </div>
+
+        <CreateMeetingDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          isStarting={isStarting}
+          onStart={(options) => {
+            setCreateOpen(false);
+            void startMeet(options);
+          }}
+        />
       </div>
     </RequireSession>
+  );
+}
+
+interface CreateMeetingDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isStarting: boolean;
+  onStart: (options: { kind: "standard" | "exam"; title?: string; password?: string; waitingRoom?: boolean; inviteEmails?: string[] }) => void;
+}
+
+/**
+ * Create-meeting dialog (Phase 16): choose Standard or Exam mode.
+ *
+ * Exam mode requires a password, enables AI proctoring, and seeds the
+ * invite roster the report's present/absent columns are graded against.
+ */
+function CreateMeetingDialog({ open, onOpenChange, isStarting, onStart }: CreateMeetingDialogProps) {
+  const [kind, setKind] = React.useState<"standard" | "exam">("standard");
+  const [title, setTitle] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [waitingRoom, setWaitingRoom] = React.useState(false);
+  const [inviteEmails, setInviteEmails] = React.useState("");
+
+  const canSubmit =
+    !isStarting &&
+    title.trim().length <= 120 &&
+    // Exam meetings require a password (enforced server-side too).
+    (kind !== "exam" || password.trim().length >= 8);
+
+  const submit = () => {
+    if (!canSubmit) return;
+    const emails = inviteEmails
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    onStart({
+      kind,
+      title: title.trim() || undefined,
+      password: kind === "exam" ? password.trim() : password.trim() || undefined,
+      waitingRoom,
+      inviteEmails: emails.length > 0 ? emails : undefined,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>New meeting</DialogTitle>
+          <DialogDescription>
+            Choose a standard meeting or a proctored exam room.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Kind switcher */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setKind("standard")}
+            className={cn(
+              "flex flex-col items-start gap-1.5 rounded-xl border p-4 text-left transition-colors",
+              kind === "standard"
+                ? "border-primary bg-primary/5 ring-primary/30 ring-2"
+                : "border-border hover:bg-muted/50",
+            )}
+          >
+            <VideoIcon className="size-5" aria-hidden="true" />
+            <span className="text-sm font-medium">Standard</span>
+            <span className="text-muted-foreground text-xs">
+              Regular meeting with chat, reactions, and screen share.
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setKind("exam")}
+            className={cn(
+              "flex flex-col items-start gap-1.5 rounded-xl border p-4 text-left transition-colors",
+              kind === "exam"
+                ? "border-warning bg-warning/5 ring-warning/30 ring-2"
+                : "border-border hover:bg-muted/50",
+            )}
+          >
+            <ShieldCheckIcon className="text-warning size-5" aria-hidden="true" />
+            <span className="text-sm font-medium">Exam</span>
+            <span className="text-muted-foreground text-xs">
+              Proctored exam with password, AI integrity checks, and a downloadable report.
+            </span>
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <Input
+            aria-label="Meeting title"
+            placeholder="Meeting title (optional)"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            maxLength={120}
+          />
+
+          {kind === "exam" ? (
+            <>
+              <Input
+                type="password"
+                aria-label="Exam password"
+                placeholder="Exam password (min 8 characters)"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="new-password"
+                required
+              />
+              <textarea
+                aria-label="Invite student emails"
+                placeholder={"Invite students (one email per line)\nstudent1@school.edu\nstudent2@school.edu"}
+                value={inviteEmails}
+                onChange={(event) => setInviteEmails(event.target.value)}
+                rows={3}
+                className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring/50 flex w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+              />
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={waitingRoom}
+                  onChange={(event) => setWaitingRoom(event.target.checked)}
+                  className="accent-primary size-4"
+                />
+                Apply to join (waiting room)
+              </label>
+              <p className="text-muted-foreground flex items-start gap-1.5 text-xs">
+                <ShieldCheckIcon className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />
+                AI proctoring will run in each student&apos;s browser. Only signal labels
+                (e.g. &ldquo;looking away +2&rdquo;) are sent to you — never their video.
+              </p>
+            </>
+          ) : (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={waitingRoom}
+                onChange={(event) => setWaitingRoom(event.target.checked)}
+                className="accent-primary size-4"
+              />
+              Apply to join (waiting room)
+            </label>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isStarting}>
+            Cancel
+          </Button>
+          <Button variant="success" onClick={submit} disabled={!canSubmit}>
+            {isStarting ? <Spinner data-icon="inline-start" /> : null}
+            {kind === "exam" ? "Create exam" : "Create meeting"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

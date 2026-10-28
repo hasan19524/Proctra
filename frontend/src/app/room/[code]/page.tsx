@@ -115,6 +115,8 @@ function RoomGate({ code }: RoomParams) {
         code={meeting.code}
         title={meeting.title}
         defaultName={user.display_name}
+        isExam={meeting.kind === "exam"}
+        proctoringEnabled={meeting.proctoring_enabled}
         onJoin={setJoin}
       />
     );

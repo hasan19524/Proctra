@@ -2,12 +2,21 @@
 
 import * as React from "react";
 
-import { MicIcon, MicOffIcon, VideoIcon, VideoOffIcon, ClipboardCopyIcon } from "lucide-react";
+import {
+  MicIcon,
+  MicOffIcon,
+  VideoIcon,
+  VideoOffIcon,
+  ClipboardCopyIcon,
+  ShieldCheckIcon,
+  ShieldAlertIcon,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
+import { runSelfCheck, type SelfCheckResult } from "@/hooks/use-proctoring";
 import { cn } from "cn";
 
 export interface JoinOptions {
@@ -21,6 +30,9 @@ interface PreJoinLobbyProps {
   code: string;
   title?: string | null;
   defaultName: string;
+  /** Phase 16 — exam mode: shows the proctoring notice + self-check. */
+  isExam?: boolean;
+  proctoringEnabled?: boolean;
   onJoin: (options: JoinOptions) => void;
 }
 
@@ -35,7 +47,14 @@ function initialsOf(name: string): string {
 }
 
 /** Pre-join lobby: real camera/mic preview with toggles before entering the meet. */
-export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyProps) {
+export function PreJoinLobby({
+  code,
+  title,
+  defaultName,
+  isExam = false,
+  proctoringEnabled = false,
+  onJoin,
+}: PreJoinLobbyProps) {
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
 
@@ -44,6 +63,8 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
   const [cameraOn, setCameraOn] = React.useState(true);
   const [password, setPassword] = React.useState("");
   const [mediaState, setMediaState] = React.useState<MediaState>("acquiring");
+  const [selfCheck, setSelfCheck] = React.useState<SelfCheckResult | null>(null);
+  const [selfCheckRunning, setSelfCheckRunning] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -102,6 +123,33 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
     }
   };
 
+  const runCheck = React.useCallback(async () => {
+    setSelfCheckRunning(true);
+    setSelfCheck(null);
+    try {
+      const result = await runSelfCheck(2200);
+      setSelfCheck(result);
+      if (result.ok) {
+        toast.add({ type: "success", title: "Camera check passed" });
+      }
+    } catch {
+      setSelfCheck({
+        ok: false,
+        faceDetected: false,
+        issues: ["Something went wrong during the camera check. Please retry."],
+        blurVariance: null,
+      });
+    } finally {
+      setSelfCheckRunning(false);
+    }
+  }, []);
+
+  const showExamNotice = isExam && proctoringEnabled;
+  const canJoin =
+    displayName.trim() &&
+    // Exam meetings always have a password (server-enforced); require it here too.
+    (!isExam || password.trim().length > 0);
+
   return (
     <div className="bg-background text-foreground flex h-svh flex-col">
       <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-4">
@@ -115,6 +163,12 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
           <span className="font-heading hidden text-lg font-semibold tracking-tight sm:block">
             Procto
           </span>
+          {showExamNotice ? (
+            <span className="bg-warning/10 text-warning flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium">
+              <ShieldCheckIcon className="size-3.5" aria-hidden="true" />
+              Exam
+            </span>
+          ) : null}
         </div>
 
         <button
@@ -136,8 +190,59 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
             {title ?? "Ready to join?"}
           </h1>
           <p className="text-muted-foreground mb-4 text-center text-sm">
-            Check your camera and microphone before you join.
+            {showExamNotice
+              ? "This is a proctored exam. Your camera will be analyzed locally — no video leaves your device."
+              : "Check your camera and microphone before you join."}
           </p>
+
+          {/* Phase 16 — exam notice + self-check card. */}
+          {showExamNotice ? (
+            <div className="border-warning/30 bg-warning/5 mb-4 rounded-xl border p-4">
+              <div className="flex items-start gap-3">
+                <ShieldCheckIcon className="text-warning mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-semibold">AI proctoring is enabled</h2>
+                  <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                    A vision model running in your browser watches for looking away, leaving the
+                    exam tab, other people in frame, and similar signals. All analysis happens
+                    locally — only the signal labels are sent to the host, never your video.
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void runCheck()}
+                      disabled={selfCheckRunning || !cameraOn}
+                      className="rounded-full"
+                    >
+                      {selfCheckRunning ? (
+                        <>
+                          <Spinner className="size-3.5" />
+                          Checking…
+                        </>
+                      ) : (
+                        "Run camera check"
+                      )}
+                    </Button>
+                    {selfCheck ? (
+                      selfCheck.ok ? (
+                        <span className="text-success flex items-center gap-1 text-xs font-medium">
+                          <ShieldCheckIcon className="size-3.5" aria-hidden="true" />
+                          Face detected — you&apos;re good to go
+                        </span>
+                      ) : (
+                        <span className="text-destructive flex items-center gap-1 text-xs font-medium">
+                          <ShieldAlertIcon className="size-3.5" aria-hidden="true" />
+                          {selfCheck.issues[0] ?? "Check failed"}
+                        </span>
+                      )
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-zinc-950">
             <video
@@ -222,11 +327,12 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
             <Input
               type="password"
               aria-label="Meeting password"
-              placeholder="Meeting password (if required)"
+              placeholder={isExam ? "Exam password (required)" : "Meeting password (if required)"}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               className="h-10 rounded-full px-4 text-center"
               autoComplete="off"
+              required={isExam}
             />
           </div>
 
@@ -234,7 +340,7 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
             <Button
               type="button"
               variant="success"
-              disabled={!displayName.trim()}
+              disabled={!canJoin}
               onClick={() =>
                 onJoin({
                   displayName: displayName.trim(),
@@ -246,7 +352,7 @@ export function PreJoinLobby({ code, title, defaultName, onJoin }: PreJoinLobbyP
               className="rounded-full px-8"
             >
               <VideoIcon data-icon="inline-start" />
-              Join now
+              {showExamNotice ? "Join exam" : "Join now"}
             </Button>
           </div>
         </div>

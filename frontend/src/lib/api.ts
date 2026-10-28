@@ -137,6 +137,8 @@ interface RequestOptions {
   method?: string;
   body?: unknown;
   auth?: boolean;
+  /** Return the raw Response (for downloads) instead of parsing JSON. */
+  raw?: boolean;
 }
 
 /**
@@ -144,7 +146,7 @@ interface RequestOptions {
  * On a 401 with a stored access token, refreshes once and retries.
  */
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, auth = true } = options;
+  const { method = "GET", body, auth = true, raw = false } = options;
 
   const send = (token: string | null): Promise<Response> =>
     fetch(path, {
@@ -167,6 +169,9 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   if (!response.ok) {
     throw await toApiError(response);
+  }
+  if (raw) {
+    return response as unknown as T;
   }
   if (response.status === 204) {
     return null as T;
@@ -214,9 +219,11 @@ export interface Meeting {
   title: string | null;
   host_id: string;
   status: "waiting" | "live" | "ended";
+  kind: "standard" | "exam";
   is_locked: boolean;
   waiting_room: boolean;
   has_password: boolean;
+  proctoring_enabled: boolean;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
@@ -232,6 +239,11 @@ export interface CreateMeetingOptions {
   title?: string;
   password?: string;
   waitingRoom?: boolean;
+  /** "exam" creates a proctored exam room (requires a password). */
+  kind?: "standard" | "exam";
+  proctoringEnabled?: boolean;
+  /** Expected-student roster: absent invitees show in the report. */
+  inviteEmails?: string[];
 }
 
 /** One row from the user's meeting history (Phase 14). */
@@ -241,10 +253,53 @@ export interface MeetingHistoryItem {
   title: string | null;
   host_id: string;
   status: string;
+  kind: string;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
   joined_at: string | null;
+}
+
+/** One proctoring event in the host's report / live flag feed. */
+export interface ProctorFlag {
+  id: string;
+  user_id: string;
+  name: string;
+  signal: string;
+  label: string;
+  points: number;
+  minute: number;
+  duration_s: number;
+  created_at: string;
+}
+
+/** Per-student rollup for the host's live integrity panel. */
+export interface ProctorStudent {
+  user_id: string;
+  name: string;
+  email: string;
+  score: number;
+  event_count: number;
+  joined_at: string | null;
+}
+
+/** Full exam report returned by GET /meetings/{code}/report. */
+export interface ExamReport {
+  meeting_code: string;
+  title: string | null;
+  kind: string;
+  generated_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  students: Array<{
+    name: string;
+    email: string;
+    status: "PRESENT" | "ABSENT";
+    cheating_score: number;
+    events: ProctorFlag[];
+    joined_at: string | null;
+    left_at: string | null;
+  }>;
 }
 
 export const meetingsApi = {
@@ -256,6 +311,13 @@ export const meetingsApi = {
       if (titleOrOptions.title) body.title = titleOrOptions.title;
       if (titleOrOptions.password) body.password = titleOrOptions.password;
       if (titleOrOptions.waitingRoom) body.waiting_room = true;
+      if (titleOrOptions.kind === "exam") {
+        body.kind = "exam";
+        body.proctoring_enabled = titleOrOptions.proctoringEnabled ?? true;
+      }
+      if (titleOrOptions.inviteEmails && titleOrOptions.inviteEmails.length > 0) {
+        body.invite_emails = titleOrOptions.inviteEmails;
+      }
     }
     return apiFetch<Meeting>("/api/v1/meetings", {
       method: "POST",
@@ -280,6 +342,31 @@ export const meetingsApi = {
       `/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}/token`,
       { method: "POST", body: password ? { password } : {} },
     );
+  },
+
+  /** Full exam report (host-only): roster, scores, timestamped events. */
+  async report(code: string): Promise<ExamReport> {
+    return apiFetch<ExamReport>(
+      `/api/v1/meetings/${encodeURIComponent(code.trim().toLowerCase())}/report`,
+    );
+  },
+
+  /** Download the exam report as a CSV file (host-only). Triggers a save dialog. */
+  async downloadReportCsv(code: string): Promise<void> {
+    const normalized = code.trim().toLowerCase();
+    const response = await apiFetch<Response>(
+      `/api/v1/meetings/${encodeURIComponent(normalized)}/report.csv`,
+      { raw: true },
+    );
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `procto-report-${normalized}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   },
 };
 

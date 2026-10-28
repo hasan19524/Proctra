@@ -41,12 +41,19 @@ async def create_meeting(
     title: str | None = None,
     password: str | None = None,
     waiting_room: bool = False,
+    kind: str = "standard",
+    proctoring_enabled: bool = False,
+    invite_emails: list[str] | None = None,
 ) -> Meeting:
     """Create a meeting owned by ``host_id``, retrying on code collisions.
 
     ``password`` is hashed (Argon2id, SECURITY.md §1) before it touches the
-    database; the plain value never leaves this function.
+    database; the plain value never leaves this function. ``invite_emails``
+    seeds the roster the exam report's present/absent columns are graded
+    against (Phase 16); duplicates are silently dropped.
     """
+    from app.models.invite import MeetingInvite
+
     for attempt in range(CODE_ATTEMPTS):
         meeting = Meeting(
             code=generate_code(),
@@ -54,6 +61,8 @@ async def create_meeting(
             host_id=host_id,
             password_hash=hash_password(password) if password else None,
             waiting_room=waiting_room,
+            kind=kind,
+            proctoring_enabled=proctoring_enabled if kind == "exam" else False,
         )
         session.add(meeting)
         try:
@@ -63,6 +72,17 @@ async def create_meeting(
             if attempt == CODE_ATTEMPTS - 1:
                 raise
             continue
+
+        # Seed the invite roster (best-effort; the meeting itself is safe).
+        if invite_emails:
+            seen: set[str] = set()
+            for email in invite_emails:
+                normalized = email.strip().lower()
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                session.add(MeetingInvite(meeting_id=meeting.id, email=normalized))
+            await session.flush()
         return meeting
     raise RuntimeError("unreachable")  # pragma: no cover
 

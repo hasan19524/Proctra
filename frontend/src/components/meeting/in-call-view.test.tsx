@@ -132,10 +132,12 @@ describe("InCallView", () => {
         code: "ktq-vxm-pnz",
         title: "Design sync",
         status: "live",
+        kind: "standard",
         is_locked: false,
         allow_chat: true,
         allow_reactions: true,
         allow_screen_share: true,
+        proctoring_enabled: false,
       },
     });
 

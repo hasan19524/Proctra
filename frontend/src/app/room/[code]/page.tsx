@@ -63,7 +63,12 @@ function RoomGate({ code }: RoomParams) {
           title="Meeting not found"
           description={`No meet matches the code ${code}. Check the code and try again.`}
           action={
-            <Button nativeButton={false} render={<Link href="/" />} variant="outline" className="mt-2 rounded-full">
+            <Button
+              nativeButton={false}
+              render={<Link href="/" />}
+              variant="outline"
+              className="mt-2 rounded-full"
+            >
               Back to home
             </Button>
           }
@@ -75,7 +80,12 @@ function RoomGate({ code }: RoomParams) {
         title="Something went wrong"
         description={error.message}
         action={
-          <Button nativeButton={false} render={<Link href="/" />} variant="outline" className="mt-2 rounded-full">
+          <Button
+            nativeButton={false}
+            render={<Link href="/" />}
+            variant="outline"
+            className="mt-2 rounded-full"
+          >
             Back to home
           </Button>
         }
@@ -101,7 +111,12 @@ function RoomGate({ code }: RoomParams) {
         title="This meet has ended"
         description={`The meet ${meeting.code} is no longer running.`}
         action={
-          <Button nativeButton={false} render={<Link href="/" />} variant="outline" className="mt-2 rounded-full">
+          <Button
+            nativeButton={false}
+            render={<Link href="/" />}
+            variant="outline"
+            className="mt-2 rounded-full"
+          >
             Back to home
           </Button>
         }
@@ -117,6 +132,7 @@ function RoomGate({ code }: RoomParams) {
         defaultName={user.display_name}
         isExam={meeting.kind === "exam"}
         proctoringEnabled={meeting.proctoring_enabled}
+        isHost={meeting.host_id === user.id}
         onJoin={setJoin}
       />
     );

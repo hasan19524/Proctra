@@ -64,22 +64,29 @@ export default function ProfilePage() {
 
                 <div className="flex flex-col gap-3 border-t pt-4">
                   <div className="flex items-center gap-3 text-sm">
-                    <MailIcon className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+                    <MailIcon
+                      className="text-muted-foreground size-4 shrink-0"
+                      aria-hidden="true"
+                    />
                     <span className="text-muted-foreground">Email</span>
                     <span className="ml-auto truncate font-medium">{user?.email}</span>
                   </div>
                   <div className="flex items-center gap-3 text-sm">
-                    <ShieldIcon className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+                    <ShieldIcon
+                      className="text-muted-foreground size-4 shrink-0"
+                      aria-hidden="true"
+                    />
                     <span className="text-muted-foreground">Role</span>
                     <span className="ml-auto font-medium capitalize">{user?.role}</span>
                   </div>
                   <div className="flex items-center gap-3 text-sm">
-                    <UserIcon className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+                    <UserIcon
+                      className="text-muted-foreground size-4 shrink-0"
+                      aria-hidden="true"
+                    />
                     <span className="text-muted-foreground">Member since</span>
                     <span className="ml-auto font-medium">
-                      {user?.created_at
-                        ? new Date(user.created_at).toLocaleDateString()
-                        : "—"}
+                      {user?.created_at ? new Date(user.created_at).toLocaleDateString() : "—"}
                     </span>
                   </div>
                 </div>
@@ -90,7 +97,11 @@ export default function ProfilePage() {
                   onClick={() => void handleLogout()}
                   disabled={pending}
                 >
-                  {pending ? <Spinner data-icon="inline-start" /> : <LogOutIcon data-icon="inline-start" />}
+                  {pending ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : (
+                    <LogOutIcon data-icon="inline-start" />
+                  )}
                   Sign out
                 </Button>
               </CardContent>

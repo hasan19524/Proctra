@@ -153,7 +153,9 @@ export function useMeetingWs(code: string | null, password?: string) {
   const [selfMuteNonce, setSelfMuteNonce] = React.useState(0);
   const [isWaiting, setIsWaiting] = React.useState(false);
   const [isRejected, setIsRejected] = React.useState(false);
-  const [pendingJoins, setPendingJoins] = React.useState<Array<{ user_id: string; name: string }>>([]);
+  const [pendingJoins, setPendingJoins] = React.useState<Array<{ user_id: string; name: string }>>(
+    [],
+  );
   const [proctorFlags, setProctorFlags] = React.useState<ProctorFlag[]>([]);
   const socketRef = React.useRef<MeetingSocket | null>(null);
   // The self id arrives with sync.state, but frames can reference it first;
@@ -262,7 +264,9 @@ export function useMeetingWs(code: string | null, password?: string) {
       }),
       socket.on<ParticipantEventPayload>("participant.joined", (payload) => {
         if (payload?.user_id) {
-          setPendingJoins((current) => current.filter((entry) => entry.user_id !== payload.user_id));
+          setPendingJoins((current) =>
+            current.filter((entry) => entry.user_id !== payload.user_id),
+          );
         }
       }),
       socket.on<ParticipantEventPayload>("participant.removed", (payload) => {
@@ -350,7 +354,11 @@ export function useMeetingWs(code: string | null, password?: string) {
    * never supplies its own score.
    */
   const sendProctorEvent = React.useCallback(
-    (signal: string, durationS = 0, detail?: Record<string, string | number | boolean>): string | null => {
+    (
+      signal: string,
+      durationS = 0,
+      detail?: Record<string, string | number | boolean>,
+    ): string | null => {
       const payload: Record<string, unknown> = { signal, duration_s: durationS };
       if (detail && Object.keys(detail).length > 0) payload.detail = detail;
       return socketRef.current?.send("proctor.event", payload) ?? null;

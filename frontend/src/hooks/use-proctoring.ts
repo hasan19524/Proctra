@@ -3,11 +3,7 @@
 import * as React from "react";
 
 import { ProctorEngine } from "@/lib/proctor/engine";
-import type {
-  ProctorObservation,
-  ProctorStatus,
-  ProctorStatusInfo,
-} from "@/lib/proctor/types";
+import type { ProctorObservation, ProctorStatus, ProctorStatusInfo } from "@/lib/proctor/types";
 
 /** Tab-hidden → immediate `tab_hidden` observation (not a vision signal). */
 function tabHiddenObservation(): ProctorObservation {
@@ -180,9 +176,7 @@ export async function runSelfCheck(durationMs = 2500): Promise<SelfCheckResult> 
 
     const faceDetected = samples > 0 && facesSeen > 0;
     if (!faceDetected) {
-      issues.push(
-        "We could not detect a face. Sit facing the camera in good light, then retry.",
-      );
+      issues.push("We could not detect a face. Sit facing the camera in good light, then retry.");
     }
 
     return { ok: faceDetected, faceDetected, issues, blurVariance: null };
@@ -190,9 +184,7 @@ export async function runSelfCheck(durationMs = 2500): Promise<SelfCheckResult> 
     return {
       ok: false,
       faceDetected: false,
-      issues: [
-        "The proctoring model could not load. Check your connection, then retry.",
-      ],
+      issues: ["The proctoring model could not load. Check your connection, then retry."],
       blurVariance: null,
     };
   } finally {

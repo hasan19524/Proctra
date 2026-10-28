@@ -64,7 +64,12 @@ function readTiles(room: Room): MediaTile[] {
  * with the caller's chosen flags, and project participants as renderable
  * tiles (identity = user id so tiles match roster entries).
  */
-export function useLiveKitRoom(code: string | null, micOn: boolean, cameraOn: boolean, password?: string) {
+export function useLiveKitRoom(
+  code: string | null,
+  micOn: boolean,
+  cameraOn: boolean,
+  password?: string,
+) {
   const [status, setStatus] = React.useState<MediaStatus>("idle");
   const [tiles, setTiles] = React.useState<MediaTile[]>([]);
   const [speakingIds, setSpeakingIds] = React.useState<string[]>([]);

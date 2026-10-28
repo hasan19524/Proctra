@@ -84,8 +84,10 @@ describe("eyeAspectRatio", () => {
 
   it("drops under 0.19 for a closed eye", () => {
     const face = makeFace({
-      159: { y: 0.42 }, 145: { y: 0.42 }, // left lid collapsed
-      386: { y: 0.42 }, 374: { y: 0.42 }, // right lid collapsed
+      159: { y: 0.42 },
+      145: { y: 0.42 }, // left lid collapsed
+      386: { y: 0.42 },
+      374: { y: 0.42 }, // right lid collapsed
     });
     expect(eyeAspectRatio(face)).toBeLessThan(0.19);
   });
@@ -156,7 +158,10 @@ describe("classifyFrame", () => {
 
   it("fires looking_away when yaw exceeds the threshold", () => {
     const state = createSignalState();
-    const config = { ...DEFAULT_CONFIG, lookingAway: { minActiveMs: 0, cooldownMs: 0, yawThreshold: 0.18 } };
+    const config = {
+      ...DEFAULT_CONFIG,
+      lookingAway: { minActiveMs: 0, cooldownMs: 0, yawThreshold: 0.18 },
+    };
     const turnedFace = makeFace({ 1: { x: 0.58 } }); // nose far from eye midpoint
     const fired = classifyFrame(state, { timestampMs: 0, faces: [turnedFace], config });
     expect(fired.map((o) => o.signal)).toContain("looking_away");
@@ -165,10 +170,15 @@ describe("classifyFrame", () => {
 
   it("fires eyes_closed when EAR is under the threshold", () => {
     const state = createSignalState();
-    const config = { ...DEFAULT_CONFIG, eyesClosed: { minActiveMs: 0, cooldownMs: 0, earThreshold: 0.19 } };
+    const config = {
+      ...DEFAULT_CONFIG,
+      eyesClosed: { minActiveMs: 0, cooldownMs: 0, earThreshold: 0.19 },
+    };
     const closedFace = makeFace({
-      159: { y: 0.42 }, 145: { y: 0.42 },
-      386: { y: 0.42 }, 374: { y: 0.42 },
+      159: { y: 0.42 },
+      145: { y: 0.42 },
+      386: { y: 0.42 },
+      374: { y: 0.42 },
     });
     const fired = classifyFrame(state, { timestampMs: 0, faces: [closedFace], config });
     expect(fired.map((o) => o.signal)).toContain("eyes_closed");
@@ -176,7 +186,10 @@ describe("classifyFrame", () => {
 
   it("fires speaking when the mouth is open past the threshold", () => {
     const state = createSignalState();
-    const config = { ...DEFAULT_CONFIG, speaking: { minActiveMs: 0, cooldownMs: 0, opennessThreshold: 0.4 } };
+    const config = {
+      ...DEFAULT_CONFIG,
+      speaking: { minActiveMs: 0, cooldownMs: 0, opennessThreshold: 0.4 },
+    };
     const openFace = makeFace({ 14: { y: 0.9 } });
     const fired = classifyFrame(state, { timestampMs: 0, faces: [openFace], config });
     expect(fired.map((o) => o.signal)).toContain("speaking");
@@ -184,7 +197,10 @@ describe("classifyFrame", () => {
 
   it("fires video_blur when the Laplacian variance is below the threshold", () => {
     const state = createSignalState();
-    const config = { ...DEFAULT_CONFIG, videoBlur: { minActiveMs: 0, cooldownMs: 0, varianceThreshold: 60 } };
+    const config = {
+      ...DEFAULT_CONFIG,
+      videoBlur: { minActiveMs: 0, cooldownMs: 0, varianceThreshold: 60 },
+    };
     const fired = classifyFrame(state, {
       timestampMs: 0,
       faces: [makeFace()],

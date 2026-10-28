@@ -32,7 +32,10 @@ export interface EngineCallbacks {
 
 /** Minimal shape of a loaded MediaPipe FaceLandmarker (avoid a hard type dep). */
 interface FaceLandmarkerLike {
-  detectForVideo(video: HTMLVideoElement, timestampMs: number): {
+  detectForVideo(
+    video: HTMLVideoElement,
+    timestampMs: number,
+  ): {
     faceLandmarks: Array<Array<{ x: number; y: number; z: number }>>;
   };
   close(): void;
@@ -142,7 +145,7 @@ export class ProctorEngine {
       this.callbacks.onStatus({
         status: "error",
         message:
-          "The proctoring model failed to load. Check your connection and retry — the exam host has been notified if this persists.",
+          "The proctoring model failed to load. Check your connection and retry — if it keeps failing, tell the host before the exam continues.",
       });
       return;
     }
@@ -226,19 +229,8 @@ export class ProctorEngine {
     const { videoWidth, videoHeight } = this.video;
     if (videoWidth === 0 || videoHeight === 0) return undefined;
     try {
-      this.canvasCtx.drawImage(
-        this.video,
-        0,
-        0,
-        BLUR_SAMPLE_WIDTH,
-        BLUR_SAMPLE_HEIGHT,
-      );
-      const { data } = this.canvasCtx.getImageData(
-        0,
-        0,
-        BLUR_SAMPLE_WIDTH,
-        BLUR_SAMPLE_HEIGHT,
-      );
+      this.canvasCtx.drawImage(this.video, 0, 0, BLUR_SAMPLE_WIDTH, BLUR_SAMPLE_HEIGHT);
+      const { data } = this.canvasCtx.getImageData(0, 0, BLUR_SAMPLE_WIDTH, BLUR_SAMPLE_HEIGHT);
       // Luma only: the Laplacian does not care about chroma.
       const gray = new Uint8ClampedArray(BLUR_SAMPLE_WIDTH * BLUR_SAMPLE_HEIGHT);
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {

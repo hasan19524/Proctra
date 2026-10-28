@@ -30,7 +30,14 @@ interface InCallSessionProps {
  * proctoring engine on the local camera and streams observations to the
  * server; hosts receive the live flag feed and can download the report.
  */
-export function InCallSession({ code, displayName, micOn, cameraOn, password, onLeave }: InCallSessionProps) {
+export function InCallSession({
+  code,
+  displayName,
+  micOn,
+  cameraOn,
+  password,
+  onLeave,
+}: InCallSessionProps) {
   const [isMicOn, setIsMicOn] = React.useState(micOn);
   const [isCameraOn, setIsCameraOn] = React.useState(cameraOn);
   const [handledMuteNonce, setHandledMuteNonce] = React.useState(0);
@@ -66,7 +73,12 @@ export function InCallSession({ code, displayName, micOn, cameraOn, password, on
   // Media (LiveKit SFU) runs beside the app WS: roster on one socket, real
   // audio/video on the SFU. A media failure degrades to chat-only. Flags are
   // the local state (not the entry props) so toggles reach LiveKit too.
-  const media = useLiveKitRoom(isWaiting || isRejected ? null : code, isMicOn, isCameraOn, password);
+  const media = useLiveKitRoom(
+    isWaiting || isRejected ? null : code,
+    isMicOn,
+    isCameraOn,
+    password,
+  );
   const mediaStatusRef = React.useRef(media.status);
   React.useEffect(() => {
     if (media.status === "failed" && mediaStatusRef.current !== "failed") {

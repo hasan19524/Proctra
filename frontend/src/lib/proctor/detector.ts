@@ -128,9 +128,21 @@ export function estimatePitch(landmarks: Landmark[]): number {
  * ~0.19 (the blink/`eyes_closed` threshold).
  */
 export function eyeAspectRatio(landmarks: Landmark[]): number {
-  const pairs: Array<[Landmark | undefined, Landmark | undefined, Landmark | undefined, Landmark | undefined]> = [
-    [landmarks[LEFT_EYE_TOP], landmarks[LEFT_EYE_BOTTOM], landmarks[LEFT_EYE_OUTER], landmarks[LEFT_EYE_INNER]],
-    [landmarks[RIGHT_EYE_TOP], landmarks[RIGHT_EYE_BOTTOM], landmarks[RIGHT_EYE_OUTER], landmarks[RIGHT_EYE_INNER]],
+  const pairs: Array<
+    [Landmark | undefined, Landmark | undefined, Landmark | undefined, Landmark | undefined]
+  > = [
+    [
+      landmarks[LEFT_EYE_TOP],
+      landmarks[LEFT_EYE_BOTTOM],
+      landmarks[LEFT_EYE_OUTER],
+      landmarks[LEFT_EYE_INNER],
+    ],
+    [
+      landmarks[RIGHT_EYE_TOP],
+      landmarks[RIGHT_EYE_BOTTOM],
+      landmarks[RIGHT_EYE_OUTER],
+      landmarks[RIGHT_EYE_INNER],
+    ],
   ];
   const ratios: number[] = [];
   for (const [top, bottom, outer, inner] of pairs) {
@@ -164,7 +176,11 @@ export function mouthOpenness(landmarks: Landmark[]): number {
  * A sharp image has strong second-derivative energy (high variance); a blurry
  * one collapses toward zero. `pixels` is row-major grayscale, 0..255.
  */
-export function laplacianVariance(pixels: Uint8ClampedArray, width: number, height: number): number {
+export function laplacianVariance(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): number {
   if (width < 3 || height < 3) return 0;
   let sum = 0;
   let sumSq = 0;
@@ -236,10 +252,7 @@ export function classifyFrame(state: SignalState, input: FrameInput): ProctorObs
     }
   }
 
-  if (
-    blurVariance !== undefined &&
-    blurVariance < config.videoBlur.varianceThreshold
-  ) {
+  if (blurVariance !== undefined && blurVariance < config.videoBlur.varianceThreshold) {
     conditions.video_blur = { variance: Math.round(blurVariance) };
   }
 
@@ -254,7 +267,10 @@ export function classifyFrame(state: SignalState, input: FrameInput): ProctorObs
       const since = state.activeSince[signal]!;
       const heldMs = timestampMs - since;
       const last = state.lastFired[signal];
-      if (heldMs >= cfg.minActiveMs && (last === undefined || timestampMs - last >= cfg.cooldownMs)) {
+      if (
+        heldMs >= cfg.minActiveMs &&
+        (last === undefined || timestampMs - last >= cfg.cooldownMs)
+      ) {
         state.lastFired[signal] = timestampMs;
         observations.push({
           signal,
@@ -279,7 +295,10 @@ const ALL_SIGNALS: ProctorSignal[] = [
   "video_blur",
 ];
 
-function configFor(config: SignalConfig, signal: ProctorSignal): { minActiveMs: number; cooldownMs: number } {
+function configFor(
+  config: SignalConfig,
+  signal: ProctorSignal,
+): { minActiveMs: number; cooldownMs: number } {
   switch (signal) {
     case "looking_away":
       return config.lookingAway;

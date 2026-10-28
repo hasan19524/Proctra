@@ -34,9 +34,7 @@ const CLOSE_UNAUTHORIZED = 4001;
 
 export function meetingWsUrl(code: string, accessToken: string, password?: string): string {
   const base = (process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8001").replace(/\/+$/, "");
-  const url = new URL(
-    `${base}/api/v1/ws/meetings/${encodeURIComponent(code)}`,
-  );
+  const url = new URL(`${base}/api/v1/ws/meetings/${encodeURIComponent(code)}`);
   url.searchParams.append("token", accessToken);
   if (password) url.searchParams.append("password", password);
   return url.toString();

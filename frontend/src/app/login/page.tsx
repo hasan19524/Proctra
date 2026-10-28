@@ -86,12 +86,12 @@ export default function LoginPage() {
           <span className="font-heading text-xl font-semibold tracking-tight">Procto</span>
         </div>
         <div className="relative max-w-md">
-          <h1 className="font-heading text-4xl font-semibold leading-tight tracking-tight">
+          <h1 className="font-heading text-4xl leading-tight font-semibold tracking-tight">
             Meet with clarity.
           </h1>
           <p className="mt-4 text-base leading-relaxed text-white/80">
-            Secure video meetings with passwords, waiting rooms, and host controls — built for
-            teams that take their conversations seriously.
+            Secure video meetings with passwords, waiting rooms, and host controls — built for teams
+            that take their conversations seriously.
           </p>
         </div>
         <p className="relative text-xs text-white/60">

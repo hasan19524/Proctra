@@ -38,9 +38,7 @@ import {
 import { extractMeetingCode, meetingsApi, type MeetingHistoryItem } from "@/lib/api";
 import { cn } from "cn";
 
-const NAV_ITEMS = [
-  { label: "Meetings", icon: CalendarDaysIcon, href: "/" },
-] as const;
+const NAV_ITEMS = [{ label: "Meetings", icon: CalendarDaysIcon, href: "/" }] as const;
 
 const WEEKDAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
@@ -178,7 +176,12 @@ export default function Home() {
             <Button variant="ghost" size="icon" aria-label="Help">
               <CircleHelpIcon />
             </Button>
-            <Button variant="ghost" size="icon" aria-label="Settings" onClick={() => router.push("/settings")}>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Settings"
+              onClick={() => router.push("/settings")}
+            >
               <SettingsIcon />
             </Button>
             <ThemeToggle />
@@ -263,9 +266,7 @@ export default function Home() {
             <section className="flex flex-1 flex-col py-6">
               {recent && recent.length > 0 ? (
                 <div className="flex flex-col gap-3">
-                  <h2 className="font-heading text-sm font-medium text-muted-foreground">
-                    Recent
-                  </h2>
+                  <h2 className="font-heading text-muted-foreground text-sm font-medium">Recent</h2>
                   <ul className="flex flex-col gap-2">
                     {recent.map((item) => (
                       <li key={item.code}>
@@ -351,7 +352,13 @@ interface CreateMeetingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isStarting: boolean;
-  onStart: (options: { kind: "standard" | "exam"; title?: string; password?: string; waitingRoom?: boolean; inviteEmails?: string[] }) => void;
+  onStart: (options: {
+    kind: "standard" | "exam";
+    title?: string;
+    password?: string;
+    waitingRoom?: boolean;
+    inviteEmails?: string[];
+  }) => void;
 }
 
 /**
@@ -360,7 +367,12 @@ interface CreateMeetingDialogProps {
  * Exam mode requires a password, enables AI proctoring, and seeds the
  * invite roster the report's present/absent columns are graded against.
  */
-function CreateMeetingDialog({ open, onOpenChange, isStarting, onStart }: CreateMeetingDialogProps) {
+function CreateMeetingDialog({
+  open,
+  onOpenChange,
+  isStarting,
+  onStart,
+}: CreateMeetingDialogProps) {
   const [kind, setKind] = React.useState<"standard" | "exam">("standard");
   const [title, setTitle] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -393,9 +405,7 @@ function CreateMeetingDialog({ open, onOpenChange, isStarting, onStart }: Create
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>New meeting</DialogTitle>
-          <DialogDescription>
-            Choose a standard meeting or a proctored exam room.
-          </DialogDescription>
+          <DialogDescription>Choose a standard meeting or a proctored exam room.</DialogDescription>
         </DialogHeader>
 
         {/* Kind switcher */}
@@ -456,7 +466,9 @@ function CreateMeetingDialog({ open, onOpenChange, isStarting, onStart }: Create
               />
               <textarea
                 aria-label="Invite student emails"
-                placeholder={"Invite students (one email per line)\nstudent1@school.edu\nstudent2@school.edu"}
+                placeholder={
+                  "Invite students (one email per line)\nstudent1@school.edu\nstudent2@school.edu"
+                }
                 value={inviteEmails}
                 onChange={(event) => setInviteEmails(event.target.value)}
                 rows={3}
@@ -472,9 +484,12 @@ function CreateMeetingDialog({ open, onOpenChange, isStarting, onStart }: Create
                 Apply to join (waiting room)
               </label>
               <p className="text-muted-foreground flex items-start gap-1.5 text-xs">
-                <ShieldCheckIcon className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />
-                AI proctoring will run in each student&apos;s browser. Only signal labels
-                (e.g. &ldquo;looking away +2&rdquo;) are sent to you — never their video.
+                <ShieldCheckIcon
+                  className="text-warning mt-0.5 size-3.5 shrink-0"
+                  aria-hidden="true"
+                />
+                AI proctoring will run in each student&apos;s browser. Only signal labels (e.g.
+                &ldquo;looking away +2&rdquo;) are sent to you — never their video.
               </p>
             </>
           ) : (

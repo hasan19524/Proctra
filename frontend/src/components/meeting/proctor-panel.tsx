@@ -80,10 +80,7 @@ export function IntegrityPanel({ flags, className, meetingCode, onClose }: Integ
   return (
     <section
       aria-label="Exam integrity"
-      className={cn(
-        "bg-card flex h-full w-full flex-col rounded-xl border shadow-sm",
-        className,
-      )}
+      className={cn("bg-card flex h-full w-full flex-col rounded-xl border shadow-sm", className)}
     >
       <header className="border-border flex items-center justify-between gap-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
@@ -101,7 +98,7 @@ export function IntegrityPanel({ flags, className, meetingCode, onClose }: Integ
       {/* Score summary per student */}
       {scores.length > 0 ? (
         <div className="border-border border-b px-4 py-3">
-          <h3 className="text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wide">
+          <h3 className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
             Scores
           </h3>
           <ul className="flex flex-col gap-1.5">
@@ -137,7 +134,10 @@ export function IntegrityPanel({ flags, className, meetingCode, onClose }: Integ
         ) : (
           <ul className="flex flex-col gap-1.5" aria-live="polite">
             {recentFlags.map((flag) => {
-              const badge = SIGNAL_BADGES[flag.signal] ?? { label: flag.signal, tone: "warn" as const };
+              const badge = SIGNAL_BADGES[flag.signal] ?? {
+                label: flag.signal,
+                tone: "warn" as const,
+              };
               return (
                 <li
                   key={flag.id}
@@ -209,11 +209,11 @@ export function StudentProctorChip({ status, message, onRetry }: StudentProctorC
       aria-live="polite"
       className={cn(
         "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm backdrop-blur-sm",
-        status === "active" && "bg-success/15 text-success border border-success/25",
-        status === "degraded" && "bg-warning/15 text-warning border border-warning/25",
-        status === "loading" && "bg-muted text-muted-foreground border border-border",
-        status === "error" && "bg-destructive/15 text-destructive border border-destructive/25",
-        status === "idle" && "bg-muted text-muted-foreground border border-border",
+        status === "active" && "bg-success/15 text-success border-success/25 border",
+        status === "degraded" && "bg-warning/15 text-warning border-warning/25 border",
+        status === "loading" && "bg-muted text-muted-foreground border-border border",
+        status === "error" && "bg-destructive/15 text-destructive border-destructive/25 border",
+        status === "idle" && "bg-muted text-muted-foreground border-border border",
       )}
     >
       {status === "active" || status === "loading" ? (

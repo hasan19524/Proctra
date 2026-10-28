@@ -37,7 +37,7 @@ export default function SettingsPage() {
         </header>
 
         <div className="flex flex-1 items-start justify-center px-4 py-10">
-          <div className="w-full max-w-md flex flex-col gap-4">
+          <div className="flex w-full max-w-md flex-col gap-4">
             <Card>
               <CardHeader>
                 <CardTitle>Appearance</CardTitle>
@@ -45,7 +45,7 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <SunIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                  <SunIcon className="text-muted-foreground size-4" aria-hidden="true" />
                   <span className="text-sm">Color theme</span>
                 </div>
                 <ThemeToggle />
@@ -57,7 +57,7 @@ export default function SettingsPage() {
                 <CardTitle>Notifications</CardTitle>
                 <CardDescription>Manage meeting alerts.</CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
+              <CardContent className="text-muted-foreground flex flex-col gap-3 text-sm">
                 <div className="flex items-center gap-3">
                   <BellIcon className="size-4 shrink-0" aria-hidden="true" />
                   <span>In-meeting chat notifications</span>
@@ -76,7 +76,7 @@ export default function SettingsPage() {
                 <CardTitle>Privacy &amp; security</CardTitle>
                 <CardDescription>How your data is handled.</CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
+              <CardContent className="text-muted-foreground flex flex-col gap-3 text-sm">
                 <div className="flex items-center gap-3">
                   <ShieldIcon className="size-4 shrink-0" aria-hidden="true" />
                   <span>Meeting passwords &amp; waiting room</span>

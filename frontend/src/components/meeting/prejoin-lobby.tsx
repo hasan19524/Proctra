@@ -33,6 +33,8 @@ interface PreJoinLobbyProps {
   /** Phase 16 — exam mode: shows the proctoring notice + self-check. */
   isExam?: boolean;
   proctoringEnabled?: boolean;
+  /** Hosts bypass the password server-side, so the UI must not demand it. */
+  isHost?: boolean;
   onJoin: (options: JoinOptions) => void;
 }
 
@@ -53,6 +55,7 @@ export function PreJoinLobby({
   defaultName,
   isExam = false,
   proctoringEnabled = false,
+  isHost = false,
   onJoin,
 }: PreJoinLobbyProps) {
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
@@ -144,11 +147,14 @@ export function PreJoinLobby({
     }
   }, []);
 
-  const showExamNotice = isExam && proctoringEnabled;
+  const isExamRoom = isExam && proctoringEnabled;
+  // The proctoring card is student-facing: the host is never proctored.
+  const showExamNotice = isExamRoom && !isHost;
   const canJoin =
     displayName.trim() &&
-    // Exam meetings always have a password (server-enforced); require it here too.
-    (!isExam || password.trim().length > 0);
+    // Exam meetings always have a password (server-enforced); the host
+    // bypasses it server-side, so only non-hosts must fill it in.
+    (!isExam || isHost || password.trim().length > 0);
 
   return (
     <div className="bg-background text-foreground flex h-svh flex-col">
@@ -163,7 +169,7 @@ export function PreJoinLobby({
           <span className="font-heading hidden text-lg font-semibold tracking-tight sm:block">
             Procto
           </span>
-          {showExamNotice ? (
+          {isExamRoom ? (
             <span className="bg-warning/10 text-warning flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium">
               <ShieldCheckIcon className="size-3.5" aria-hidden="true" />
               Exam
@@ -199,7 +205,10 @@ export function PreJoinLobby({
           {showExamNotice ? (
             <div className="border-warning/30 bg-warning/5 mb-4 rounded-xl border p-4">
               <div className="flex items-start gap-3">
-                <ShieldCheckIcon className="text-warning mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                <ShieldCheckIcon
+                  className="text-warning mt-0.5 size-5 shrink-0"
+                  aria-hidden="true"
+                />
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-semibold">AI proctoring is enabled</h2>
                   <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
@@ -327,12 +336,18 @@ export function PreJoinLobby({
             <Input
               type="password"
               aria-label="Meeting password"
-              placeholder={isExam ? "Exam password (required)" : "Meeting password (if required)"}
+              placeholder={
+                isExam
+                  ? isHost
+                    ? "Exam password (not needed for you)"
+                    : "Exam password (required)"
+                  : "Meeting password (if required)"
+              }
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               className="h-10 rounded-full px-4 text-center"
               autoComplete="off"
-              required={isExam}
+              required={isExam && !isHost}
             />
           </div>
 
@@ -352,7 +367,7 @@ export function PreJoinLobby({
               className="rounded-full px-8"
             >
               <VideoIcon data-icon="inline-start" />
-              {showExamNotice ? "Join exam" : "Join now"}
+              {isExamRoom && !isHost ? "Join exam" : "Join now"}
             </Button>
           </div>
         </div>

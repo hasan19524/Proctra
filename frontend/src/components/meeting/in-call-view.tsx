@@ -34,6 +34,7 @@ import type {
   WsReaction,
 } from "@/hooks/use-meeting-ws";
 import type { WsStatus } from "@/lib/ws";
+import { shareOrCopyLink } from "@/lib/share";
 import { MeetingControls, UtilityCluster } from "@/components/meeting/meeting-controls";
 import {
   ChatPanel,
@@ -461,7 +462,28 @@ export function InCallView({
               onRejectJoin={onRejectJoin}
               onMute={(id) => onHostAction("mute_participant", { target_id: id })}
               onRemove={(id) => onHostAction("remove", { target_id: id })}
-              onAddPeople={() => demo("Invite people (demo)")}
+              onAddPeople={() => {
+                // The invite is the link (D25): native share sheet on mobile,
+                // clipboard fallback on desktop.
+                void shareOrCopyLink(
+                  inviteUrl,
+                  meeting?.title ? `${meeting.title} — Procto` : "Join my meet on Procto",
+                ).then((outcome) => {
+                  if (outcome === "copied") {
+                    toast.add({
+                      type: "success",
+                      title: "Invite link copied",
+                      description: "Paste it in any chat — the code travels with the link.",
+                    });
+                  } else if (outcome === "failed") {
+                    toast.add({
+                      type: "error",
+                      title: "Couldn't share the link",
+                      description: inviteUrl,
+                    });
+                  }
+                });
+              }}
               onClose={() => setPanel(null)}
               className="h-full"
             />

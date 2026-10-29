@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { readNextPath, useNextQuery } from "@/lib/redirect";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -23,8 +24,18 @@ interface FormErrors {
 }
 
 export default function RegisterPage() {
+  // Prerender-safe: useSearchParams needs a Suspense boundary (Next.js docs).
+  return (
+    <React.Suspense fallback={null}>
+      <RegisterForm />
+    </React.Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
   const { status, register } = useSession();
+  const loginQuery = useNextQuery();
 
   const [displayName, setDisplayName] = React.useState("");
   const [email, setEmail] = React.useState("");
@@ -35,7 +46,7 @@ export default function RegisterPage() {
 
   React.useEffect(() => {
     if (status === "authenticated") {
-      router.replace("/");
+      router.replace(readNextPath() ?? "/");
     }
   }, [status, router]);
 
@@ -67,7 +78,7 @@ export default function RegisterPage() {
     setPending(true);
     try {
       await register({ email: trimmedEmail, password, displayName: trimmedName });
-      router.replace("/");
+      router.replace(readNextPath() ?? "/");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Something went wrong. Try again.");
     } finally {
@@ -196,7 +207,7 @@ export default function RegisterPage() {
 
           <p className="text-muted-foreground mt-4 text-center text-sm">
             Already have an account?{" "}
-            <Link href="/login" className="text-primary font-medium hover:underline">
+            <Link href={`/login${loginQuery}`} className="text-primary font-medium hover:underline">
               Sign in
             </Link>
           </p>

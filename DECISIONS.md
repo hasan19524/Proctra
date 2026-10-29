@@ -602,3 +602,35 @@ change, because records store keys rather than URLs. MinIO CE is end-of-life
 and its Docker Hub image was deleted (Sept 2026), so compose pins
 `bitnamilegacy/minio`, the last anonymously pullable image of the AGPL server;
 the abstraction means replacing that image later is a one-line compose change.
+
+
+## D25 - Invites are the link: no email dependency
+
+**Context.** Phase 1 planned G3 invite emails (SMTP via a Gmail app password), but the
+product's real invite path is already a shared meeting link with an optional password
+(the PreJoinLobby gate): the host pastes `/room/<code>` into chat, exactly like a meet
+link. The deployer is a student at $0 with no credit card, so every extra account
+(DuckDNS aside) adds friction, and consumer-SMTP delivery to spam folders is unreliable
+anyway. Two flow gaps existed: unauthenticated visitors opening a room link were bounced
+to `/login` and lost their destination, and the in-call "Add people" button was a demo
+toast.
+
+**Decision.**
+- Invites are **the link**: `/room/<code>` plus the meeting/exam password when set is the
+  only invite mechanism. G3 invite-email delivery is descoped from launch scope; no SMTP,
+  no `SMTP_*` env vars, no mailer code, no Gmail account. `MeetingInvite` stays exactly
+  what it is today - report roster metadata (PRESENT/ABSENT rows built by
+  `proctor_service.build_report`) - and never implies delivery.
+- Unauthenticated visits preserve the destination: gated views redirect to
+  `/login?next=<path>`; `login` and `register` honour `?next=` and carry it across the
+  login/register hop. `next` is sanitised to same-origin, single-slash paths only
+  (`lib/redirect.ts` - open-redirect guard, unit-tested against `//host`,
+  `javascript:`, backslash and absolute-URL tricks).
+- Sharing uses `navigator.share` when the platform offers it (mobile), clipboard copy
+  otherwise (`lib/share.ts`), wired to the in-call "Add people" control.
+
+**Consequences.** LAUNCH_PLAN loses every Gmail/SMTP row (budget, accounts, checklist,
+risks). Link sharing is bounded by existing join rate limits, the optional password, and
+the waiting room - forwarded links alone cannot impersonate anyone. A future password
+reset (audit finding H5) will need a delivery channel; when built it brings its own
+decision (transactional provider, e.g. Resend free tier) rather than reviving G3.

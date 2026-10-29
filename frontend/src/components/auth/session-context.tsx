@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { Spinner } from "@/components/ui/spinner";
 import {
@@ -105,12 +105,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 export function useRequireSession(): SessionStatus {
   const { status } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
 
   React.useEffect(() => {
     if (status === "unauthenticated") {
-      router.replace("/login");
+      // Preserve the destination (e.g. an invite link /room/abc-def-ghi) so
+      // login can return the visitor straight to the meeting.
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
     }
-  }, [status, router]);
+  }, [status, router, pathname]);
 
   return status;
 }

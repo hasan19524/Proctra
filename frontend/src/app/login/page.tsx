@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { readNextPath, useNextQuery } from "@/lib/redirect";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -22,8 +23,18 @@ interface FormErrors {
 }
 
 export default function LoginPage() {
+  // Prerender-safe: useSearchParams needs a Suspense boundary (Next.js docs).
+  return (
+    <React.Suspense fallback={null}>
+      <LoginForm />
+    </React.Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
   const { status, login } = useSession();
+  const registerQuery = useNextQuery();
 
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -33,7 +44,7 @@ export default function LoginPage() {
 
   React.useEffect(() => {
     if (status === "authenticated") {
-      router.replace("/");
+      router.replace(readNextPath() ?? "/");
     }
   }, [status, router]);
 
@@ -59,7 +70,7 @@ export default function LoginPage() {
     setPending(true);
     try {
       await login(trimmed, password);
-      router.replace("/");
+      router.replace(readNextPath() ?? "/");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Something went wrong. Try again.");
     } finally {
@@ -169,7 +180,10 @@ export default function LoginPage() {
 
           <p className="text-muted-foreground mt-4 text-center text-sm">
             New to Procto?{" "}
-            <Link href="/register" className="text-primary font-medium hover:underline">
+            <Link
+              href={`/register${registerQuery}`}
+              className="text-primary font-medium hover:underline"
+            >
               Create an account
             </Link>
           </p>

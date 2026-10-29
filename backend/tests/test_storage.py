@@ -37,6 +37,7 @@ from app.storage import (
     ObjectStream,
     R2Storage,
     RangeNotSatisfiableError,
+    S3Storage,
     StorageConfigError,
     build_storage,
 )
@@ -60,7 +61,7 @@ class TestProviderSelection:
 
     def test_unknown_provider_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            Settings(_env_file=None, storage_provider="s3")
+            Settings(_env_file=None, storage_provider="gcs")
 
     def test_r2_requires_credentials(self) -> None:
         cfg = Settings(_env_file=None, storage_provider="r2")
@@ -100,6 +101,85 @@ class TestProviderSelection:
             **_PROD_SECRETS,
         )
         assert build_storage(cfg).name == "r2"
+
+    def test_s3_requires_credentials(self) -> None:
+        cfg = Settings(_env_file=None, storage_provider="s3")
+        with pytest.raises(StorageConfigError, match="S3_ENDPOINT"):
+            build_storage(cfg)
+
+    def test_s3_names_every_missing_variable(self) -> None:
+        cfg = Settings(_env_file=None, storage_provider="s3", s3_endpoint="b2.example.com")
+        with pytest.raises(StorageConfigError) as exc_info:
+            build_storage(cfg)
+        message = str(exc_info.value)
+        for label in ("S3_REGION", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_BUCKET"):
+            assert label in message
+        assert "S3_ENDPOINT" not in message  # supplied, so not reported missing
+
+    def test_s3_with_credentials_builds_b2_shaped_endpoint(self) -> None:
+        cfg = Settings(
+            _env_file=None,
+            storage_provider="s3",
+            s3_endpoint="https://s3.us-west-004.backblazeb2.com",
+            s3_region="us-west-004",
+            s3_access_key_id="key-id",
+            s3_secret_access_key="key-secret",
+            s3_bucket="procto-evidence",
+        )
+        storage = build_storage(cfg)
+        assert isinstance(storage, S3Storage)
+        assert storage.name == "s3"
+        assert storage._endpoint_url == "https://s3.us-west-004.backblazeb2.com"
+        assert storage._region == "us-west-004"
+        # Path-style addressing is the portable default for S3-compatible vendors.
+        assert storage._addressing_style == "path"
+
+    def test_s3_adds_https_scheme_when_absent(self) -> None:
+        cfg = Settings(
+            _env_file=None,
+            storage_provider="s3",
+            s3_endpoint="s3.us-west-004.backblazeb2.com/",
+            s3_region="us-west-004",
+            s3_access_key_id="k",
+            s3_secret_access_key="s",
+            s3_bucket="b",
+        )
+        storage = build_storage(cfg)
+        assert isinstance(storage, S3Storage)
+        assert storage._endpoint_url == "https://s3.us-west-004.backblazeb2.com"
+
+    def test_s3_addressing_style_is_validated(self) -> None:
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, storage_provider="s3", s3_addressing_style="sideways")
+
+    def test_s3_honours_explicit_addressing_style(self) -> None:
+        cfg = Settings(
+            _env_file=None,
+            storage_provider="s3",
+            s3_endpoint="https://s3.us-west-004.backblazeb2.com",
+            s3_region="us-west-004",
+            s3_access_key_id="k",
+            s3_secret_access_key="s",
+            s3_bucket="b",
+            s3_addressing_style="auto",
+        )
+        storage = build_storage(cfg)
+        assert isinstance(storage, S3Storage)
+        assert storage._addressing_style == "auto"
+
+    def test_production_allows_s3(self) -> None:
+        cfg = Settings(
+            _env_file=None,
+            app_env="production",
+            storage_provider="s3",
+            s3_endpoint="https://s3.us-west-004.backblazeb2.com",
+            s3_region="us-west-004",
+            s3_access_key_id="key-id",
+            s3_secret_access_key="key-secret",
+            s3_bucket="procto-evidence",
+            **_PROD_SECRETS,
+        )
+        assert build_storage(cfg).name == "s3"
 
     def test_empty_minio_endpoint_rejected(self) -> None:
         cfg = Settings(_env_file=None, minio_endpoint="   ")
@@ -278,3 +358,108 @@ class TestMinIOIntegration:
             response = await client.get(f"http://localhost:9000/procto/{key}")
 
         assert response.status_code == 403
+
+
+@pytest.fixture
+async def s3_storage() -> AsyncIterator[S3Storage]:
+    """Generic S3Storage driven by the local MinIO endpoint.
+
+    MinIO speaks the same S3 wire protocol as Backblaze B2, so this exercises
+    the exact provider class a B2 deployment constructs (endpoint, region,
+    path-style addressing) without any cloud account or internet access. The
+    B2-specific values are covered by the config tests above; the request
+    signing/streaming path exercised here is identical.
+    """
+    await skip_without_minio()
+    store = S3Storage(
+        endpoint="http://localhost:9000",
+        access_key_id=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
+        secret_access_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
+        bucket=os.environ.get("MINIO_BUCKET", "procto"),
+        region="us-east-1",
+        addressing_style="path",
+    )
+    await store.ensure_bucket()
+    yield store
+
+
+class TestGenericS3Integration:
+    """The generic provider over the real S3 protocol (MinIO stand-in for B2)."""
+
+    async def test_ensure_bucket_is_idempotent(self, s3_storage: S3Storage) -> None:
+        await s3_storage.ensure_bucket()
+        await s3_storage.ensure_bucket()
+
+    async def test_put_stat_exists_open_roundtrip(self, s3_storage: S3Storage) -> None:
+        payload = b"b2-evidence-" + uuid.uuid4().bytes * 8
+        key = f"tests/{uuid.uuid4()}.bin"
+
+        await s3_storage.put(key, io.BytesIO(payload), content_type="application/octet-stream")
+
+        stat = await s3_storage.stat(key)
+        assert stat is not None
+        assert stat.size == len(payload)
+        assert stat.content_type == "application/octet-stream"
+        assert await s3_storage.exists(key) is True
+
+        stream = await s3_storage.open(key)
+        assert stream.status == 200
+        assert await _drain(stream) == payload
+
+    async def test_open_closed_range_returns_slice(self, s3_storage: S3Storage) -> None:
+        payload = bytes(range(256)) * 4
+        key = f"tests/{uuid.uuid4()}.bin"
+        await s3_storage.put(key, io.BytesIO(payload), content_type="application/octet-stream")
+
+        stream = await s3_storage.open(key, byte_range=(10, 25))
+        assert stream.status == 206
+        assert await _drain(stream) == payload[10:26]
+        assert stream.content_range == f"bytes 10-25/{len(payload)}"
+
+    async def test_open_ended_range(self, s3_storage: S3Storage) -> None:
+        payload = b"0123456789" * 10
+        key = f"tests/{uuid.uuid4()}.bin"
+        await s3_storage.put(key, io.BytesIO(payload), content_type="application/octet-stream")
+
+        stream = await s3_storage.open(key, byte_range=(95, None))
+        assert stream.status == 206
+        assert await _drain(stream) == payload[95:]
+        assert stream.content_range == f"bytes 95-{len(payload) - 1}/{len(payload)}"
+
+    async def test_missing_object_is_none_or_not_found(self, s3_storage: S3Storage) -> None:
+        key = f"tests/missing-{uuid.uuid4()}"
+        assert await s3_storage.stat(key) is None
+        assert await s3_storage.exists(key) is False
+        with pytest.raises(ObjectNotFoundError):
+            await s3_storage.open(key)
+
+    async def test_range_outside_object_rejected(self, s3_storage: S3Storage) -> None:
+        key = f"tests/{uuid.uuid4()}.bin"
+        await s3_storage.put(key, io.BytesIO(b"tiny"), content_type="application/octet-stream")
+
+        with pytest.raises(RangeNotSatisfiableError):
+            await s3_storage.open(key, byte_range=(1000, 2000))
+
+    async def test_delete_is_idempotent(self, s3_storage: S3Storage) -> None:
+        key = f"tests/{uuid.uuid4()}.bin"
+        await s3_storage.put(key, io.BytesIO(b"bye"), content_type="application/octet-stream")
+
+        await s3_storage.delete(key)
+        await s3_storage.delete(key)
+
+        assert await s3_storage.stat(key) is None
+
+    async def test_presigned_url_serves_object(self, s3_storage: S3Storage) -> None:
+        payload = b"signed-" + uuid.uuid4().bytes
+        key = f"tests/{uuid.uuid4()}.bin"
+        await s3_storage.put(key, io.BytesIO(payload), content_type="application/octet-stream")
+
+        url = s3_storage.presign_get(key, expires_in=60)
+        assert "X-Amz-Expires=60" in url
+        # Path-style presign keeps the bucket in the path, not the host.
+        assert "/procto/" in url
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url)
+        assert response.status_code == 200
+        assert response.content == payload

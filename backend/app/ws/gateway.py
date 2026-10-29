@@ -7,6 +7,7 @@ notes, and transient reactions (whitelisted labels, never persisted).
 """
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -15,7 +16,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
@@ -732,15 +733,61 @@ async def _handle_host_action(
         await _send_ws_error(websocket, "unknown_action", f"Unsupported host action: {action}")
 
 
+# --- WS handshake credentials (AUDIT.md H1) --------------------------------
+# The access token and meeting password ride the Sec-WebSocket-Protocol header
+# instead of the URL query string. Reverse proxies and uvicorn log the request
+# path (including ?token=&password=) on every upgrade; headers are not logged,
+# so join secrets stay out of plaintext access logs (SECURITY.md §5). The
+# browser WebSocket API cannot set arbitrary headers, but it does accept a
+# subprotocol list, whose entries are carried verbatim in this header.
+_WS_SUBPROTOCOL = "procto.v1"
+_TOKEN_PREFIX = "procto.token."
+_PASSWORD_PREFIX = "procto.password."
+# Decode cap: an access JWT is well under this; a longer value is garbage, not
+# a credential. Bounds memory/CPU on a hostile header before any Argon2 work.
+_MAX_SUBPROTOCOL_LEN = 4096
+
+
+def _decode_subprotocol(value: str) -> str | None:
+    """base64url-decode one subprotocol entry's payload; None if malformed."""
+    if not value or len(value) > _MAX_SUBPROTOCOL_LEN:
+        return None
+    padding = "=" * (-len(value) % 4)
+    try:
+        return base64.urlsafe_b64decode(value + padding).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def _credentials_from_subprotocols(websocket: WebSocket) -> tuple[str | None, str | None]:
+    """Extract (access_token, meeting_password) from the upgrade headers.
+
+    Reads both the Sec-WebSocket-Protocol header and the parsed ASGI
+    ``subprotocols`` scope entry so local ASGI test clients and every deployed
+    server behave identically. Absent or malformed entries decode to ``None``.
+    """
+    token: str | None = None
+    password: str | None = None
+    raw = websocket.headers.get("sec-websocket-protocol", "")
+    entries = [entry.strip() for entry in raw.split(",")]
+    entries += list(websocket.scope.get("subprotocols") or ())
+    for entry in entries:
+        if entry.startswith(_TOKEN_PREFIX) and token is None:
+            token = _decode_subprotocol(entry[len(_TOKEN_PREFIX) :])
+        elif entry.startswith(_PASSWORD_PREFIX) and password is None:
+            password = _decode_subprotocol(entry[len(_PASSWORD_PREFIX) :])
+    return token, password
+
+
 @router.websocket("/meetings/{meeting_code}")
-async def ws_meeting(
-    websocket: WebSocket,
-    meeting_code: str,
-    token: str | None = Query(default=None),
-    password: str | None = Query(default=None, max_length=64),
-) -> None:
-    """Authenticated app-WS endpoint for one meeting (REALTIME.md §1)."""
+async def ws_meeting(websocket: WebSocket, meeting_code: str) -> None:
+    """Authenticated app-WS endpoint for one meeting (REALTIME.md §1).
+
+    Credentials (access token, optional meeting password) arrive in the
+    Sec-WebSocket-Protocol header, not the URL — see `_credentials_from_subprotocols`.
+    """
     code = normalize_code(meeting_code)
+    token, password = _credentials_from_subprotocols(websocket)
 
     # 0. Origin allow-list: browsers always send Origin on a WS upgrade, so a
     #    cross-site page cannot dial into a meeting on a victim's session.
@@ -761,7 +808,7 @@ async def ws_meeting(
         await _reject(websocket, CLOSE_PROTOCOL_ERROR, "rate_limited", "Too many connections")
         return
 
-    # 1. Authenticate the upgrade (access token as query param).
+    # 1. Authenticate the upgrade (access token from the subprotocol header).
     if not token:
         await _reject(websocket, CLOSE_UNAUTHORIZED, "unauthorized", "Missing access token")
         return
@@ -824,7 +871,10 @@ async def ws_meeting(
         )
         return
 
-    await websocket.accept()
+    # Offer back the version subprotocol (browsers require the server to echo
+    # one of the offered entries; the credential entries themselves are never
+    # echoed). Non-browser clients ignore the response header.
+    await websocket.accept(subprotocol=_WS_SUBPROTOCOL)
 
     conn = registry.add(code, str(user.id), websocket, is_host=is_host)
     conn.waiting = awaiting

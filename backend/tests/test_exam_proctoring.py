@@ -12,7 +12,6 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.main import app as fastapi_app
 from app.models.invite import MeetingInvite
 from app.models.meeting import Meeting
 from app.models.proctor import PROCTOR_SIGNALS, ProctorEvent
@@ -117,19 +116,15 @@ async def _join_exam_via_ws(
     """Connect a student to an exam room.
 
     Flips waiting_room off first (host approval is covered in
-    test_host_controls; here we exercise the WS proctor pipeline) and passes
-    the meeting password as a query param, as the pre-join flow does.
+    test_host_controls; here we exercise the WS proctor pipeline) and joins
+    with the meeting password, as the pre-join flow does.
     """
     async with SessionLocal() as session:
         row = await session.get(Meeting, meeting["id"])
         assert row is not None
         row.waiting_room = False
         await session.commit()
-    ws = WsTestClient(
-        fastapi_app,
-        f"/api/v1/ws/meetings/{meeting['code']}",
-        query={"token": student["access_token"], "password": EXAM_PASSWORD},
-    )
+    ws = _ws(meeting["code"], student["access_token"], EXAM_PASSWORD)
     await ws.connect()
     await ws.receive_type("sync.state")
     return ws
@@ -346,11 +341,7 @@ class TestSnapshot:
             assert row is not None
             row.waiting_room = False
             await session.commit()
-        ws_student = WsTestClient(
-            fastapi_app,
-            f"/api/v1/ws/meetings/{meeting['code']}",
-            query={"token": student["access_token"], "password": EXAM_PASSWORD},
-        )
+        ws_student = _ws(meeting["code"], student["access_token"], EXAM_PASSWORD)
         await ws_student.connect()
         student_payload = await ws_student.receive_type("sync.state")
         assert student_payload["payload"]["meeting"]["kind"] == "exam"

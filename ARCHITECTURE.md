@@ -113,7 +113,9 @@ Details: [SECURITY.md](./SECURITY.md).
 
 ## 7. WebSocket (application) architecture
 
-- Endpoint: `GET /api/v1/ws/meetings/{meeting_id}?token=<access_jwt>` (WebSocket upgrade).
+- Endpoint: `GET /api/v1/ws/meetings/{meeting_id}` (WebSocket upgrade) with credentials
+  in the `Sec-WebSocket-Protocol` header (`procto.v1`, `procto.token.<b64url>`,
+  `procto.password.<b64url>`) — never in the URL (AUDIT.md H1).
 - On connect: authenticate → authorize membership → register in the in-memory registry
   → subscribe to the Redis pub/sub channel for that meeting (multi-worker safe).
 - All frames use a versioned JSON envelope; see [REALTIME.md](./REALTIME.md).

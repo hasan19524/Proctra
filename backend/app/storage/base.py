@@ -1,9 +1,10 @@
 """Provider-independent object storage contract (DECISIONS.md D24).
 
 Business logic (uploads, evidence reads, retention, reports) talks only to
-:class:`ObjectStorage`. Two S3-compatible providers implement it —
-``MinIOStorage`` for local development/testing and ``R2Storage`` for Cloudflare
-R2 in production — and nothing outside ``app.storage`` ever learns which one is
+:class:`ObjectStorage`. Three S3-compatible providers implement it —
+``MinIOStorage`` for local development/testing, ``R2Storage`` for Cloudflare
+R2, and the generic ``S3Storage`` profile (Backblaze B2, Wasabi, ...) in
+cloud production — and nothing outside ``app.storage`` ever learns which one is
 configured (``STORAGE_PROVIDER``).
 
 Every method is async; blocking SDK calls run in a worker thread so storage I/O
@@ -61,7 +62,7 @@ class ObjectStream:
 class ObjectStorage(ABC):
     """The operations Procto needs from any object store (D24 §3)."""
 
-    #: Provider name for diagnostics ("minio" / "r2").
+    #: Provider name for diagnostics ("minio" / "r2" / "s3").
     name: str
 
     @abstractmethod

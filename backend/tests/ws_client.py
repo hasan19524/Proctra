@@ -6,11 +6,20 @@ Redis fixtures). Frames are exchanged through two asyncio queues.
 """
 
 import asyncio
+import base64
 import json
 from collections.abc import Callable
 from typing import Any
 
 WS_PATH_TYPE = "websocket"
+WS_PATH = "/api/v1/ws/meetings"
+
+_SUBPROTOCOL_VERSION = "procto.v1"
+
+
+def _b64(value: str) -> str:
+    """base64url without padding — the wire format for credential entries."""
+    return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
 
 
 class WsDisconnect(Exception):
@@ -24,13 +33,34 @@ class WsDisconnect(Exception):
 class WsTestClient:
     """One WebSocket connection against the ASGI app."""
 
-    def __init__(self, app: Any, path: str, query: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        app: Any,
+        path: str,
+        query: dict[str, str] | None = None,
+        *,
+        token: str | None = None,
+        password: str | None = None,
+        echo_subprotocol: bool = True,
+    ) -> None:
         self._app = app
         self._inbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._outbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         from urllib.parse import urlencode
 
         qs = urlencode(query or {})
+
+        # Credentials ride Sec-WebSocket-Protocol, never the URL (AUDIT.md H1).
+        subprotocols: list[str] = [_SUBPROTOCOL_VERSION] if echo_subprotocol else []
+        headers = [(b"host", b"testserver")]
+        if token is not None:
+            entry = f"procto.token.{_b64(token)}"
+            subprotocols.append(entry)
+            headers.append((b"sec-websocket-protocol", ", ".join(subprotocols).encode()))
+        if password is not None:
+            subprotocols.append(f"procto.password.{_b64(password)}")
+            headers.append((b"sec-websocket-protocol", ", ".join(subprotocols).encode()))
+
         self._scope: dict[str, Any] = {
             "type": WS_PATH_TYPE,
             "asgi": {"version": "3.0", "spec_version": "2.3"},
@@ -41,14 +71,15 @@ class WsTestClient:
             "raw_path": path.encode(),
             "query_string": qs.encode(),
             "root_path": "",
-            "headers": [(b"host", b"testserver")],
+            "headers": headers,
             "client": ("testclient", 50000),
             "server": ("testserver", 80),
-            "subprotocols": [],
+            "subprotocols": subprotocols,
             "state": {},
         }
         self._task: asyncio.Task[None] | None = None
         self.close_code: int | None = None
+        self.accepted_subprotocol: str | None = None
 
     async def _app_receive(self) -> dict[str, Any]:
         return await self._inbound.get()
@@ -65,6 +96,7 @@ class WsTestClient:
             raise WsDisconnect(message.get("code"))
         if message["type"] != "websocket.accept":
             raise AssertionError(f"unexpected handshake frame: {message}")
+        self.accepted_subprotocol = message.get("subprotocol")
 
     async def send(self, frame: dict[str, Any] | str) -> None:
         """Send a client frame (dict is JSON-encoded)."""

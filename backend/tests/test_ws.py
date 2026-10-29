@@ -1,7 +1,7 @@
 """WebSocket gateway tests (Phase 4): handshake auth, envelope, presence fan-out."""
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -47,9 +47,21 @@ async def _create_meeting(client: AsyncClient, token: str) -> dict[str, Any]:
     return data
 
 
-def _ws(code: str, token: str | None = None) -> WsTestClient:
-    query = {"token": token} if token else None
-    return WsTestClient(fastapi_app, f"{WS_PATH}/{code}", query=query)
+def _ws(
+    code: str,
+    token: str | None = None,
+    password: str | None = None,
+    *,
+    echo_subprotocol: bool = True,
+) -> WsTestClient:
+    """Connect to a meeting WS. Credentials ride Sec-WebSocket-Protocol (H1)."""
+    return WsTestClient(
+        fastapi_app,
+        f"{WS_PATH}/{code}",
+        token=token,
+        password=password,
+        echo_subprotocol=echo_subprotocol,
+    )
 
 
 async def _connect_ready(ws: WsTestClient) -> dict[str, Any]:
@@ -144,6 +156,65 @@ class TestHandshake:
         assert payload["meeting"]["code"] == meeting["code"]
         assert payload["meeting"]["is_locked"] is True
         await host_ws.close()
+
+
+class TestCredentialTransport:
+    """H1 regression: join secrets ride Sec-WebSocket-Protocol, never the URL."""
+
+    async def test_token_in_query_string_is_rejected(self, client: AsyncClient) -> None:
+        # A legacy-style client that puts the token in ?token= must not get in:
+        # the gateway no longer reads credentials from the query string.
+        auth = await _register(client, "h1query@procto.dev", "Host")
+        meeting = await _create_meeting(client, auth["access_token"])
+        legacy = WsTestClient(
+            fastapi_app,
+            f"{WS_PATH}/{meeting['code']}",
+            query={"token": auth["access_token"]},
+        )
+        await _expect_reject(legacy, CLOSE_UNAUTHORIZED, "unauthorized")
+
+    async def test_valid_token_in_subprotocol_connects(self, client: AsyncClient) -> None:
+        auth = await _register(client, "h1header@procto.dev", "Host")
+        meeting = await _create_meeting(client, auth["access_token"])
+
+        ws = _ws(meeting["code"], auth["access_token"])
+        payload = await _connect_ready(ws)
+        assert payload["meeting"]["code"] == meeting["code"]
+        assert ws.accepted_subprotocol == "procto.v1"
+        await ws.close()
+
+    async def test_malformed_base64_token_is_rejected(self, client: AsyncClient) -> None:
+        ws = WsTestClient(
+            fastapi_app,
+            f"{WS_PATH}/abc-def-ghi",
+            echo_subprotocol=False,
+        )
+        ws._scope["subprotocols"] = ["procto.v1", "procto.token.%%%not-base64%%%"]
+        ws._scope["headers"].append(
+            (b"sec-websocket-protocol", b"procto.v1, procto.token.%%%not-base64%%%")
+        )
+        await _expect_reject(ws, CLOSE_UNAUTHORIZED, "unauthorized")
+
+    async def test_password_round_trips_via_subprotocol(self, client: AsyncClient) -> None:
+        host = await _register(client, "h1pw@procto.dev", "Host")
+        guest = await _register(client, "h1pwguest@procto.dev", "Guest")
+        created = await client.post(
+            "/api/v1/meetings",
+            json={"title": "Locked exam", "password": "sesame12", "waiting_room": False},
+            headers={"Authorization": f"Bearer {host['access_token']}"},
+        )
+        assert created.status_code == 201, created.text
+        meeting = cast(dict[str, Any], created.json())
+
+        # Wrong password still lands on the guarded path, not a crash.
+        bad = _ws(meeting["code"], guest["access_token"], "wrong-pass")
+        await _expect_reject(bad, CLOSE_FORBIDDEN, "wrong_password")
+
+        # Correct password connects — proving the header value reached verify_password.
+        good = _ws(meeting["code"], guest["access_token"], "sesame12")
+        payload = await _connect_ready(good)
+        assert payload["meeting"]["code"] == meeting["code"]
+        await good.close()
 
 
 class TestSession:

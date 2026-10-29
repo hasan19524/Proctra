@@ -27,7 +27,7 @@ Related docs: [DEPLOYMENT.md](DEPLOYMENT.md) (VM/R2 runbook — parked, see §3.
 | Database | **Supabase Free** (Postgres) | $0 | No | 500 MB; pauses on ~7 days inactivity → our health check runs `SELECT 1` every 5 min (keeps it live) |
 | Redis (rate limits) | **Upstash Free** | $0 | No | 10k cmds/day; our limiter **fails open** (documented) if exhausted — watch, don't panic |
 | Video | **LiveKit Cloud Build** | $0 | No | **5,000 WebRTC participant-min/mo hard cap**, 100 concurrent, 50 GB egress; no overage billing (hard stop, resets 1st) |
-| Evidence storage | **Backblaze B2** (10 GB) | $0 | No | uploads fail-clearly when full; needs D24 endpoint generalization (§3.2) |
+| Evidence storage | **Backblaze B2** (10 GB) | $0 | No | uploads fail-clearly when full; ✅ generic `s3` provider shipped (§3.2) |
 | Keep-alive + uptime | **UptimeRobot Free** | $0 | No | 50 monitors @ 5-min → pings `/api/health` (never `robots.txt`) + alerts via webhook/email |
 | CI | GitHub Actions (public repo) | $0 | No | unlimited minutes + free arm64 runners |
 | Domain (optional polish) | DuckDNS ✅ | $0 | No | CNAME → Vercel/Render when we want the branded URL |
@@ -153,9 +153,11 @@ env values flip (storage provider, `LIVEKIT_URL`, domain).
   from the runbook, health check path `/api/health` with `SELECT 1` — §0.5, pre-deploy
   `alembic upgrade head`) and a Dockerfile CMD that honors `$PORT` (today it hardcodes
   8001; Render injects `$PORT`).
-- **Storage (D24 amendment):** generalize the S3 endpoint/region/addressing so
-  `STORAGE_PROVIDER` can point at Backblaze B2 (path-style, custom endpoint) — fail-fast
-  validation stays. MinIO remains the dev/test provider unchanged.
+- **Storage (D24 amendment): ✅ shipped** — `STORAGE_PROVIDER=s3` is a generic
+  S3-compatible provider (`S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`,
+  `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, optional `S3_ADDRESSING_STYLE`, default
+  path-style) covering Backblaze B2 and any other vendor; fail-fast validation
+  stays. MinIO (dev/test) and R2 are unchanged.
 - Cookie stays `SameSite=Lax` (proxy makes it same-site) — no auth rework by design.
 - Drop from the old plan: Caddyfile `/rtc` route, LiveKit port publishing, ufw, DuckDNS
   A-record-at-deploy (all VM-only). DuckDNS custom domain = optional polish step.

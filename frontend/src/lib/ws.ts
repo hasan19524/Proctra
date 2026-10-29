@@ -3,8 +3,15 @@
  *
  * Speaks the v1 envelope from REALTIME.md: `{v, type, id, ts, seq?, payload}`.
  * Next.js rewrites do not proxy WebSockets, so the socket connects directly to
- * `NEXT_PUBLIC_WS_URL` (default `ws://localhost:8001`) with the access token
- * as a query parameter.
+ * `NEXT_PUBLIC_WS_URL` (default `ws://localhost:8001`).
+ *
+ * Credentials (access token + optional meeting password) ride the
+ * `Sec-WebSocket-Protocol` header — NOT the URL query string (AUDIT.md H1).
+ * Reverse proxies and uvicorn log the request path (including `?token=`) on
+ * every upgrade; headers are not logged, so join secrets stay out of plaintext
+ * access logs. The browser WebSocket API cannot set arbitrary headers, but it
+ * does accept a subprotocol list, carried verbatim in that header. Entries are
+ * base64url (padding stripped) so each is a valid RFC 6455 token.
  *
  * Reconnect policy: exponential backoff with jitter; auth/protocol rejects
  * (4001/4003/4004/4008) are fatal (except 4001, which retries once after a
@@ -32,12 +39,34 @@ const BACKOFF_MAX_MS = 15_000;
 const FATAL_CLOSE_CODES = new Set([4001, 4003, 4004, 4008]);
 const CLOSE_UNAUTHORIZED = 4001;
 
-export function meetingWsUrl(code: string, accessToken: string, password?: string): string {
+/** Version subprotocol the server echoes back on a successful handshake. */
+const WS_SUBPROTOCOL_VERSION = "procto.v1";
+
+/** base64url with padding stripped — the wire format for credential entries. */
+function toBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function meetingWsUrl(code: string): string {
   const base = (process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8001").replace(/\/+$/, "");
-  const url = new URL(`${base}/api/v1/ws/meetings/${encodeURIComponent(code)}`);
-  url.searchParams.append("token", accessToken);
-  if (password) url.searchParams.append("password", password);
-  return url.toString();
+  return `${base}/api/v1/ws/meetings/${encodeURIComponent(code)}`;
+}
+
+/**
+ * Subprotocol entries for the handshake: a version marker plus base64url-encoded
+ * credentials. Never placed in the URL (H1).
+ */
+export function meetingWsProtocols(accessToken: string, password?: string): string[] {
+  const entries = [WS_SUBPROTOCOL_VERSION, `procto.token.${toBase64Url(accessToken)}`];
+  if (password) {
+    entries.push(`procto.password.${toBase64Url(password)}`);
+  }
+  return entries;
 }
 
 /** Random id used for frame ids and client-side idempotency keys. */
@@ -174,7 +203,7 @@ export class MeetingSocket {
 
     let ws: WebSocket;
     try {
-      ws = new WebSocket(meetingWsUrl(this.code, token, this.getPassword()));
+      ws = new WebSocket(meetingWsUrl(this.code), meetingWsProtocols(token, this.getPassword()));
     } catch {
       this.scheduleReconnect();
       return;

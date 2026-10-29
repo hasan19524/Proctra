@@ -1,12 +1,16 @@
-"""S3-compatible storage providers: MinIO (dev/test) and Cloudflare R2 (prod).
+"""S3-compatible storage providers: MinIO (dev/test), Cloudflare R2, and a
+generic endpoint-described profile (Backblaze B2, Wasabi, ...) for production.
 
-Both providers speak the S3 wire protocol, so they share one implementation
+All providers speak the S3 wire protocol, so they share one implementation
 (``S3CompatibleStorage``) and differ only in endpoint/addressing configuration:
 
 * ``MinIOStorage`` — plain ``http://`` endpoint on localhost, path-style keys
   (``/bucket/key``), self-hosted via Docker Compose. Never needs internet.
 * ``R2Storage`` — Cloudflare's virtual-hosted S3 endpoint
   (``https://<account>.r2.cloudflarestorage.com``), region ``auto``.
+* ``S3Storage`` — fully configuration-described S3-compatible endpoint
+  (Backblaze B2, Wasabi, DigitalOcean Spaces, ...) with an explicit
+  endpoint/region and path-style addressing by default.
 
 boto3 calls are synchronous; every public method offloads to a worker thread
 (``run_in_threadpool``) so storage I/O never blocks the event loop. The boto3
@@ -332,4 +336,41 @@ class R2Storage(S3CompatibleStorage):
             bucket=bucket,
             region=region,
             addressing_style="auto",
+        )
+
+
+class S3Storage(S3CompatibleStorage):
+    """Generic S3-compatible provider (D24 §3.2 generalization).
+
+    Any endpoint-addressed S3 implementation — Backblaze B2
+    (``https://s3.<region>.backblazeb2.com``), Wasabi, DigitalOcean Spaces — is
+    described entirely by configuration: endpoint, region, credentials, and
+    addressing style. Nothing vendor-specific is hardcoded, so a new store is
+    an env value rather than a code change. Path-style addressing is the
+    default because every S3-compatible vendor accepts it.
+
+    Credentials are server-side only and never reach the frontend
+    (SECURITY.md §6).
+    """
+
+    name = "s3"
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        access_key_id: str,
+        secret_access_key: str,
+        bucket: str,
+        region: str,
+        addressing_style: str = "path",
+    ) -> None:
+        base = endpoint if "://" in endpoint else f"https://{endpoint}"
+        super().__init__(
+            endpoint_url=base.rstrip("/"),
+            access_key=access_key_id,
+            secret_key=secret_access_key,
+            bucket=bucket,
+            region=region,
+            addressing_style=addressing_style,
         )

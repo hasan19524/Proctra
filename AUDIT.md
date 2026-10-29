@@ -26,6 +26,12 @@ that mirrors URLs (error trackers, APM) leaks them too. Violates SECURITY.md §5
 secrets are never logged").
 **Fix:** pass secrets via a POST-minted single-use ticket or the `Sec-WebSocket-Protocol`
 header, and scrub query strings from access logs.
+**✅ Fixed (sprint 2026-10-29):** credentials now ride `Sec-WebSocket-Protocol`
+(`procto.v1`, `procto.token.<b64url>`, `procto.password.<b64url>`); the endpoint takes no
+credential query params, the client puts nothing in the URL, and the server echoes only
+`procto.v1`. With no secrets left in URLs there is nothing sensitive for access logs to
+record. Regression tests: `TestCredentialTransport` (backend), `meetingWsProtocols` +
+URL assertions (frontend).
 
 ### H2 — Exam access is "shared password only"; the invite roster is never enforced at join
 `backend/app/ws/gateway.py:786-817`, `backend/app/api/v1/meetings.py:124-150` check only

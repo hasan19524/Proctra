@@ -12,13 +12,23 @@ Two realtime channels. This split is intentional and must be preserved.
 ### Endpoint
 
 ```text
-GET /api/v1/ws/meetings/{meeting_id}?token=<access_jwt>   → 101 Switching Protocols
+GET /api/v1/ws/meetings/{meeting_id}                       → 101 Switching Protocols
+Sec-WebSocket-Protocol: procto.v1,
+                        procto.token.<base64url(access_jwt)>,
+                        procto.password.<base64url(meeting_password)>   (optional)
 ```
+
+Credentials ride the `Sec-WebSocket-Protocol` header, **never the URL query
+string** (AUDIT.md H1): proxies and uvicorn access logs record the request path
+on every upgrade, but not headers, so join secrets stay out of plaintext logs.
+Entries are base64url with padding stripped so each is a valid RFC 6455 token;
+this is transport encoding, not encryption — TLS protects the header in flight.
+The server echoes only `procto.v1` on accept (never the credential entries).
 
 ### Connect lifecycle
 
 ```text
-1. HTTP upgrade request + access token
+1. HTTP upgrade request + credentials in Sec-WebSocket-Protocol
 2. Backend validates JWT signature/expiry
 3. Backend loads meeting, checks: exists, not ended, not locked,
    membership / waiting-room state

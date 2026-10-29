@@ -603,6 +603,16 @@ and its Docker Hub image was deleted (Sept 2026), so compose pins
 `bitnamilegacy/minio`, the last anonymously pullable image of the AGPL server;
 the abstraction means replacing that image later is a one-line compose change.
 
+**Amendment (2026-10-29, §3.2):** a third provider, `S3Storage`
+(`STORAGE_PROVIDER=s3`), generalizes endpoint/region/addressing so any
+S3-compatible vendor works — Backblaze B2 (`https://s3.<region>.backblazeb2.com`,
+region `us-<region>-NNN`, path-style default), Wasabi, DigitalOcean Spaces.
+Config via `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`,
+`S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, optional `S3_ADDRESSING_STYLE`
+(`path`|`auto`|`virtual`). Fail-fast validation is unchanged: production still
+refuses `minio`, `r2` and `s3` are both allowed, and missing `S3_*` values are
+named at startup. R2 and MinIO behavior is untouched.
+
 
 ## D25 - Invites are the link: no email dependency
 

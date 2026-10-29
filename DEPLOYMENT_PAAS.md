@@ -87,15 +87,17 @@ Project settings (not env): Root Directory = `frontend`, framework auto-detected
 |---|---|
 | `TRUSTED_HOSTS` | `<vercel-domain>,<render-domain>` (comma/JSON; **empty = no Host check at all** — behind the Vercel proxy verify which Host header arrives, then pin both) |
 
-**Storage block — planned names, ships with the B2 code change (LAUNCH_PLAN §3.2):**
+**Storage block (Backblaze B2 via the generic `s3` provider — ships in repo):**
 
 | Variable | Value |
 |---|---|
-| `STORAGE_PROVIDER` | `b2` (today only `minio\|r2` exists — the endpoint generalization is the pending repo change) |
-| `B2_ENDPOINT` | `https://s3.<region>.backblazeb2.com` (from the bucket page) |
-| `B2_REGION` | e.g. `us-west-002` |
-| `B2_ACCESS_KEY_ID` / `B2_SECRET_ACCESS_KEY` | the application key you created |
-| `B2_BUCKET` | `procto-evidence` |
+| `STORAGE_PROVIDER` | `s3` (generic S3-compatible provider; `minio` = local dev, `r2` = Cloudflare R2 still valid) |
+| `S3_ENDPOINT` | `https://s3.<region>.backblazeb2.com` (from the bucket page) |
+| `S3_REGION` | e.g. `us-west-004` (must match the bucket's region) |
+| `S3_ACCESS_KEY_ID` | the B2 application key ID |
+| `S3_SECRET_ACCESS_KEY` | the B2 application key |
+| `S3_BUCKET` | `procto-evidence` |
+| `S3_ADDRESSING_STYLE` | leave unset (`path` default — correct for B2) |
 
 **Optional (defaults are fine):** `ACCESS_TOKEN_TTL_MINUTES=15`,
 `REFRESH_TOKEN_TTL_DAYS=30`, `STORAGE_RETENTION_DAYS=90`,
@@ -150,10 +152,10 @@ via their own Git integrations (OAuth, not secrets).
 - [ ] Dockerfile CMD honors `--port ${PORT:-8001}` (Render injects `$PORT`).
 - [ ] `render.yaml` blueprint: web service (root `backend/`), the env table §2.2 as
       `envVars`, health path, `preDeploy: alembic upgrade head`.
-- [ ] B2 endpoint/region generalization of the D24 storage abstraction (provider preset
-      + fail-fast validation, tests against MinIO unchanged).
-- [ ] Audit H1 (password/token out of WS URLs) lands first — do not deploy with secrets
-      in query strings.
+- [x] B2 endpoint/region generalization of the D24 storage abstraction (generic
+      `s3` provider + fail-fast validation; MinIO/R2 unchanged, gated tests).
+- [x] Audit H1 (password/token out of WS URLs) landed — credentials ride
+      `Sec-WebSocket-Protocol`; do not deploy with secrets in query strings.
 - [ ] `./scripts/procto.ps1 check` green.
 
 ## 4. Honest free-tier watch list (dashboards, weekly)

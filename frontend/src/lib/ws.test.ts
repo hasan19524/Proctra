@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MeetingSocket, buildFrame, meetingWsUrl, type WsStatus } from "@/lib/ws";
+import {
+  MeetingSocket,
+  buildFrame,
+  meetingWsProtocols,
+  meetingWsUrl,
+  type WsStatus,
+} from "@/lib/ws";
 
 vi.mock("@/lib/api", () => ({
   getAccessToken: vi.fn(() => "token-1"),
@@ -11,6 +17,7 @@ class MockWebSocket {
   static OPEN = 1;
   static instances: MockWebSocket[] = [];
   url: string;
+  protocols: string[];
   readyState = 0;
   sent: string[] = [];
   onopen: (() => void) | null = null;
@@ -18,8 +25,9 @@ class MockWebSocket {
   onclose: ((event: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
 
-  constructor(url: string) {
+  constructor(url: string, protocols: string[] = []) {
     this.url = url;
+    this.protocols = protocols;
     MockWebSocket.instances.push(this);
   }
 
@@ -64,18 +72,38 @@ async function flushAsync() {
 }
 
 describe("meetingWsUrl", () => {
-  it("builds the backend ws endpoint with code and token", () => {
-    expect(meetingWsUrl("abc-def-ghi", "tok en")).toBe(
-      "ws://localhost:8001/api/v1/ws/meetings/abc-def-ghi?token=tok+en",
-    );
+  it("builds the backend ws endpoint with no credentials in the URL", () => {
+    expect(meetingWsUrl("abc-def-ghi")).toBe("ws://localhost:8001/api/v1/ws/meetings/abc-def-ghi");
   });
 
   it("honours NEXT_PUBLIC_WS_URL and strips trailing slashes", () => {
     process.env.NEXT_PUBLIC_WS_URL = "ws://api:8001///";
-    expect(meetingWsUrl("abc-def-ghi", "t")).toBe(
-      "ws://api:8001/api/v1/ws/meetings/abc-def-ghi?token=t",
-    );
+    expect(meetingWsUrl("abc-def-ghi")).toBe("ws://api:8001/api/v1/ws/meetings/abc-def-ghi");
     delete process.env.NEXT_PUBLIC_WS_URL;
+  });
+});
+
+describe("meetingWsProtocols (H1: credentials never in the URL)", () => {
+  function b64url(value: string): string {
+    const bytes = new TextEncoder().encode(value);
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  it("encodes the access token as a subprotocol entry", () => {
+    expect(meetingWsProtocols("tok en")).toEqual(["procto.v1", `procto.token.${b64url("tok en")}`]);
+  });
+
+  it("omits the password entry when no password is supplied", () => {
+    const entries = meetingWsProtocols("t");
+    expect(entries).toHaveLength(2);
+    expect(entries.some((entry) => entry.startsWith("procto.password."))).toBe(false);
+  });
+
+  it("appends an encoded password entry when supplied", () => {
+    const entries = meetingWsProtocols("t", "s3cret");
+    expect(entries).toContain(`procto.password.${b64url("s3cret")}`);
   });
 });
 
@@ -117,13 +145,33 @@ describe("MeetingSocket", () => {
 
     expect(statuses).toContain("connecting");
     const ws = MockWebSocket.last();
-    expect(ws.url).toContain("/api/v1/ws/meetings/abc-def-ghi?token=token-1");
+    // H1: the access token must never appear in the URL — it rides the
+    // Sec-WebSocket-Protocol header (passed to the WebSocket constructor).
+    expect(ws.url).toBe("ws://localhost:8001/api/v1/ws/meetings/abc-def-ghi");
+    expect(ws.url).not.toContain("token");
+    expect(ws.protocols).toContain("procto.v1");
+    expect(ws.protocols).toContain("procto.token.dG9rZW4tMQ"); // b64url("token-1")
 
     ws.serverOpen();
     expect(socket.getStatus()).toBe("open");
     expect(sentTypes(ws)[0]).toBe("sync");
     socket.close();
     expect(socket.getStatus()).toBe("closed");
+  });
+
+  it("sends the meeting password as a subprotocol entry, not in the URL", () => {
+    const socket = new MeetingSocket(
+      "abc-def-ghi",
+      () => "token-1",
+      () => "s3cret",
+    );
+    socket.connect();
+
+    const ws = MockWebSocket.last();
+    expect(ws.url).not.toContain("s3cret");
+    expect(ws.url).not.toContain("password");
+    expect(ws.protocols).toContain("procto.password.czNjcmV0"); // b64url("s3cret")
+    socket.close();
   });
 
   it("queues frames sent while connecting and flushes them on open", () => {

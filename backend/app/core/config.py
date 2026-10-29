@@ -113,10 +113,13 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = Field(default=None, alias="COOKIE_SECURE")
 
     # ---- Object storage (DECISIONS.md D24) ----
-    # Provider selection: minio in development/testing, r2 in cloud production.
+    # Provider selection: minio in development/testing; r2 (Cloudflare) or the
+    # generic s3 profile (Backblaze B2, Wasabi, ...) in cloud production.
     # The concrete provider is resolved by app.storage at startup; business
     # logic only ever sees the ObjectStorage interface.
-    storage_provider: Literal["minio", "r2"] = Field(default="minio", alias="STORAGE_PROVIDER")
+    storage_provider: Literal["minio", "r2", "s3"] = Field(
+        default="minio", alias="STORAGE_PROVIDER"
+    )
     # MinIO (S3-compatible, local dev/test — no internet or credentials needed).
     minio_endpoint: str = Field(default="localhost:9000", alias="MINIO_ENDPOINT")
     minio_access_key: str = Field(default="minioadmin", alias="MINIO_ACCESS_KEY")
@@ -128,6 +131,18 @@ class Settings(BaseSettings):
     r2_access_key_id: str = Field(default="", alias="R2_ACCESS_KEY_ID")
     r2_secret_access_key: str = Field(default="", alias="R2_SECRET_ACCESS_KEY")
     r2_bucket: str = Field(default="", alias="R2_BUCKET")
+    # Generic S3-compatible store (D24 §3.2 generalization): Backblaze B2
+    # (https://s3.<region>.backblazeb2.com, region us-<region>-NNN), Wasabi,
+    # DigitalOcean Spaces, ... Endpoint carries its own scheme; addressing
+    # defaults to path-style, which every S3-compatible vendor accepts.
+    s3_endpoint: str = Field(default="", alias="S3_ENDPOINT")
+    s3_region: str = Field(default="", alias="S3_REGION")
+    s3_access_key_id: str = Field(default="", alias="S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str = Field(default="", alias="S3_SECRET_ACCESS_KEY")
+    s3_bucket: str = Field(default="", alias="S3_BUCKET")
+    s3_addressing_style: Literal["path", "auto", "virtual"] = Field(
+        default="path", alias="S3_ADDRESSING_STYLE"
+    )
     # Evidence behaviour shared by every provider.
     storage_signed_url_ttl_seconds: int = Field(default=300, alias="STORAGE_SIGNED_URL_TTL_SECONDS")
     # Days until uploaded objects become eligible for automatic cleanup

@@ -41,10 +41,12 @@ Heroku credit), self-hosting on the laptop (user decision), shady "free VPS" ad-
 ### 0.5 How the split stack is engineered (the two tricks)
 
 1. **One origin via Vercel rewrites.** The browser only ever talks to the Vercel domain:
-   `vercel.json` proxies `/api/*` → the Render service, so `Set-Cookie` arrives on the
-   frontend's own origin — **SameSite=Lax cookies keep working, zero CORS/CSRF rework**.
-   WebSockets skip the proxy: `NEXT_PUBLIC_WS_URL=wss://<service>.onrender.com` connects
-   direct (WS auth is the token, never a cookie).
+   the existing Next.js rewrite (`next.config.ts`, target set through the
+   `API_INTERNAL_URL` env) proxies `/api/v1/*` to the Render service, so `Set-Cookie`
+   arrives on the frontend's own origin — **SameSite=Lax cookies keep working, zero
+   CORS/CSRF rework**. WebSockets skip the proxy:
+   `NEXT_PUBLIC_WS_URL=wss://<service>.onrender.com` connects direct (WS auth is the
+   token, never a cookie).
 2. **Keep-alive that satisfies three platforms at once.** UptimeRobot hits
    `/api/health` every **5 min** (Render sleeps at 15 min of silence — and since Feb 2026
    WS messages also count, so live meetings self-sustain). That same handler runs a
@@ -106,7 +108,9 @@ If you decline the T1 proposal, start with #2 (audit fixes — already underway)
 7. **UptimeRobot** — free account → monitor #1: `https://<service>.onrender.com/api/health`
    every 5 min (this is the Render keep-alive **and** the Supabase activity source).
 
-**No Gmail, no Oracle, no Cloudflare** (D25 / D26).
+**No Gmail, no Oracle, no Cloudflare** (D25 / D26). Exact values to save and which
+dashboard each one feeds: [DEPLOYMENT_PAAS.md](DEPLOYMENT_PAAS.md) §1–2 (fill-in
+template: `.env.paaS.example`).
 
 ### 2.2 Secrets (Render env + Vercel env)
 
@@ -139,10 +143,16 @@ env values flip (storage provider, `LIVEKIT_URL`, domain).
 
 ### 3.2 Repo changes needed for the PaaS deploy
 
-- `vercel.json`: rewrite `/api/*` → Render URL (same-origin cookie flow, §0.5); build
-  command/settings for the Next 16 app (read the bundled docs before writing config).
-- `render.yaml` (blueprint): one web service from the existing backend Dockerfile, env
-  var wiring, health check path `/api/health` (must include `SELECT 1` — §0.5).
+> Full step-by-step: [DEPLOYMENT_PAAS.md](DEPLOYMENT_PAAS.md) (env var per service,
+> wiring order, verify list) + fill-in template `.env.paaS.example`.
+
+- **Vercel** (settings, not files): Root Directory = `frontend/`; env `API_INTERNAL_URL`
+  + `NEXT_PUBLIC_WS_URL` — the `/api/v1/*` rewrite itself already exists in
+  `next.config.ts` (no `vercel.json` needed).
+- **Render:** `render.yaml` blueprint (web service from the backend Dockerfile, env table
+  from the runbook, health check path `/api/health` with `SELECT 1` — §0.5, pre-deploy
+  `alembic upgrade head`) and a Dockerfile CMD that honors `$PORT` (today it hardcodes
+  8001; Render injects `$PORT`).
 - **Storage (D24 amendment):** generalize the S3 endpoint/region/addressing so
   `STORAGE_PROVIDER` can point at Backblaze B2 (path-style, custom endpoint) — fail-fast
   validation stays. MinIO remains the dev/test provider unchanged.

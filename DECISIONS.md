@@ -651,9 +651,10 @@ intercepts /robots.txt while asleep; LiveKit Cloud Build = no card, 5,000 WebRTC
 participant-minutes/month as a hard cap with no overage billing.
 
 **Decision.** Launch on a split free-PaaS stack, every provider card-free:
-- **Vercel Hobby** serves the Next.js frontend and - via a `vercel.json` rewrite of
-  `/api/*` to the Render service - makes the whole app single-origin in the browser, so
-  the existing SameSite=Lax cookie auth keeps working with no CORS/CSRF rework.
+- **Vercel Hobby** serves the Next.js frontend and - via a server-side rewrite of
+  `/api/v1/*` to the Render service (`next.config.ts`, target = `API_INTERNAL_URL`) -
+  makes the whole app single-origin in the browser, so the existing SameSite=Lax cookie
+  auth keeps working with no CORS/CSRF rework.
 - **Render Free** runs the single backend web service (existing Dockerfile).
   `NEXT_PUBLIC_WS_URL` points WebSockets straight at Render (token auth, no cookie).
   UptimeRobot pings `/api/health` every 5 minutes - the keep-alive that fits the 750-hour

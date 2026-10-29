@@ -19,7 +19,7 @@ Related docs: [DEPLOYMENT.md](DEPLOYMENT.md) (env tables, R2 checklist, go-live 
 
 | Need | Provider | Cost | Card? | Free-tier limit |
 |---|---|---|---|---|
-| Server | Oracle Always Free `VM.Standard.A1.Flex` (up to 4 OCPU / 24 GB ARM) | $0/mo forever | Yes (identity check only) | Always Free quota; idle ARM instances can be reclaimed → we keep it warm (§4) |
+| Server | Oracle Always Free `VM.Standard.A1.Flex` (**2 OCPU / 12 GB ARM** + 2× small AMD micros, **200 GB** total storage) | $0/mo forever | Yes (identity check only) | Oracle quietly halved this from 4 OCPU/24 GB in Jul 2026; idle ARM instances can still be reclaimed → we keep it warm (§4) |
 | Domain | DuckDNS (`proctra.duckdns.org`) | $0 | No | a handful of subdomains |
 | TLS | Let's Encrypt (via Caddy, HTTP-01 on port 80) | $0 | No | auto-renewed |
 | Object storage | Cloudflare R2 **free tier** | $0 | Card on file likely | ~10 GB storage + 1M Class A / 10M Class B ops per month (verify in dashboard) |
@@ -73,9 +73,11 @@ If you decline the T1 proposal, start with #2 (security audit).
 ### 2.2 VM provisioning (Oracle console)
 
 - Region/AD **with A1 capacity** (if shape launch fails, switch region).
-- Shape `VM.Standard.A1.Flex`, **4 OCPU / 24 GB RAM** (Always Free maximum),
-  Ubuntu 24.04 aarch64, ~47 GB boot volume (all our images are multi-arch: python-slim,
-  node:22-alpine, postgres, redis, livekit, caddy all build natively on ARM).
+- Shape `VM.Standard.A1.Flex`, **2 OCPU / 12 GB RAM** (current Always Free maximum —
+  Oracle halved the old 4 OCPU/24 GB in July 2026; our full stack needs ~3 GB, so this
+  is comfortable), Ubuntu 24.04 aarch64, ~47–50 GB boot volume (all our images are
+  multi-arch: python-slim, node:22-alpine, postgres, redis, livekit, caddy all build
+  natively on ARM). Total free storage across volumes: 200 GB.
 - VCN + internet gateway + public IP.
 - **Security list ingress:** TCP 22 (your IP only), TCP 80 (Caddy cert issuance/renewal),
   TCP 443, UDP 50000–50099 (must match `rtc.port_range` in `livekit/livekit.yaml`),
@@ -117,7 +119,25 @@ The mailer code itself ships in Phase 1 #7; `.env.example` gets the SMTP block t
 
 ## 3. Phase 3 — Go-live
 
-### 3.1 Repo changes needed for the single-VM deploy
+### 3.1 Deployment paths (pick one)
+
+| | **Path A — Docker Compose** | **Path B — Native, zero Docker** | **Path C — PaaS fallback** |
+|---|---|---|---|
+| What | Current [DEPLOYMENT.md](DEPLOYMENT.md) stack on the Oracle VM | Same VM, plain systemd units: apt Postgres/Redis/Caddy, LiveKit static binary (arm64), `uv`+uvicorn, `node .next/standalone/server.js` | Frontend→Vercel, backend→Render, video→LiveKit Cloud, DB→Neon/Upstash free |
+| Ops burden | Low | Medium (units + deploy script) | Near zero |
+| Always-on? | Yes | Yes | ❌ 15-min sleep + cold starts; Render free Postgres **deletes itself after 30 days**; 5 GB bandwidth/mo; no UDP (LiveKit Cloud free minute caps); Vercel/Render free tiers are **non-commercial** |
+| Verdict | ✅ default | ✅ use if Docker is the problem | ⚠️ demo-grade only — not exam-day material |
+
+**Path A** needs no new work (documented end-to-end). **Path B** removes Docker from
+production entirely — same `.env.prod`, same `Caddyfile`, same `livekit.yaml`; the
+differences are a `deploy.sh` (uv sync → alembic upgrade → restart units), systemd unit
+files I'll write when we get there, and UptimeRobot (free, external) instead of the Kuma
+container. Local dev/tests keep Docker regardless (the test gate needs Postgres/Redis/
+MinIO). **Path C** exists only as a last resort if the Oracle signup fails (no card):
+every feature still works, but exam-day reliability drops hard. Default: **A**, switch to
+**B** the moment Docker gets in the way.
+
+### 3.2 Repo changes needed for the single-VM deploy
 
 - `docker-compose.prod.yml`: publish LiveKit ports (UDP media range; signaling if not
   proxied) — currently commented with "prefer exposing at the host/edge".
@@ -127,7 +147,7 @@ The mailer code itself ships in Phase 1 #7; `.env.example` gets the SMTP block t
 - Fold this plan's infra specifics (Oracle, DuckDNS, R2 free tier) into DEPLOYMENT.md
   once executed.
 
-### 3.2 First launch
+### 3.3 First launch
 
 1. Pre-flight: gate green, E2E green, `docker compose -f docker-compose.prod.yml config`
    passes on the VM.
@@ -139,7 +159,7 @@ The mailer code itself ships in Phase 1 #7; `.env.example` gets the SMTP block t
    dashboard. (DEPLOYMENT.md has the full R2 checklist.)
 5. `https://proctra.duckdns.org` serves, browser shows the camera prompt (secure origin).
 
-### 3.3 Feature verification checklist (every feature, once manually)
+### 3.4 Feature verification checklist (every feature, once manually)
 
 - [ ] register / login / logout — cookies `Secure`, refresh rotation
 - [ ] create meeting, share link, waiting room admit/decline, lock/unlock, end-for-all
@@ -155,7 +175,7 @@ The mailer code itself ships in Phase 1 #7; `.env.example` gets the SMTP block t
 - [ ] demo seed runs; Playwright green in CI
 - [ ] Uptime Kuma: monitors `/api/health` + site every 60 s, alert email received
 
-### 3.4 Optional: auto-deploy
+### 3.5 Optional: auto-deploy
 
 GitHub Actions job on push to `master` → SSH → `git pull` + compose up (free for public
 repos, includes free arm64 runners if we later prebuild images to GHCR). Manual
@@ -180,6 +200,7 @@ repos, includes free arm64 runners if we later prebuild images to GHCR). Manual
 
 | Risk | Impact | Mitigation |
 |---|---|---|
+| Oracle trims the free tier again (it quietly halved A1 in Jul 2026) | less headroom | stack needs ~3 GB / ~1.5 OCPU — survives another halving; Path C is the escape hatch |
 | Oracle reclaims idle ARM / quota quirks | downtime | warm-up cron; account stays active; backups make worst case recoverable |
 | A1 capacity scarce in some regions | signup friction | pick a region with stock |
 | R2 free tier (~10 GB) fills with evidence | uploads fail (fail-clearly) | 90-day retention sweeper, host deletions, dashboard alarm → paid tier is the escape hatch |

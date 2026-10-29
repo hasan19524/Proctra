@@ -634,3 +634,47 @@ risks). Link sharing is bounded by existing join rate limits, the optional passw
 the waiting room - forwarded links alone cannot impersonate anyone. A future password
 reset (audit finding H5) will need a delivery channel; when built it brings its own
 decision (transactional provider, e.g. Resend free tier) rather than reviving G3.
+
+
+## D26 - Launch hosting: split free PaaS, no card, no laptop
+
+**Context.** The original plan (Oracle Always Free VM + Cloudflare R2) requires a payment
+method on file: Oracle accepts only credit cards and debit "that function like credit"
+(virtual, prepaid and single-use rejected), and R2's free tier asks for a card too. The
+deployer is a student with no card who explicitly does not want their laptop acting as a
+server. The GitHub Student Developer Pack was checked (Sept/Oct 2026 partner list): it no
+longer contains any VPS (DigitalOcean left the pack 31 Jul 2026) and its Heroku credit
+requires a card; its one card-free compute offer, Azure for Students, was declined in
+favour of the pack-free PaaS route. Verified 2026 terms: Render free = 750 shared
+instance-hours/month, spins down after 15 min without inbound HTTP *or* WS traffic, and
+intercepts /robots.txt while asleep; LiveKit Cloud Build = no card, 5,000 WebRTC
+participant-minutes/month as a hard cap with no overage billing.
+
+**Decision.** Launch on a split free-PaaS stack, every provider card-free:
+- **Vercel Hobby** serves the Next.js frontend and - via a `vercel.json` rewrite of
+  `/api/*` to the Render service - makes the whole app single-origin in the browser, so
+  the existing SameSite=Lax cookie auth keeps working with no CORS/CSRF rework.
+- **Render Free** runs the single backend web service (existing Dockerfile).
+  `NEXT_PUBLIC_WS_URL` points WebSockets straight at Render (token auth, no cookie).
+  UptimeRobot pings `/api/health` every 5 minutes - the keep-alive that fits the 750-hour
+  budget (one always-on service = 720-744 h) and never touches the /robots.txt trap.
+- **Supabase** (Postgres, IPv4 session pooler, sslmode=require) and **Upstash** (Redis for
+  rate limiting, which fails open by documented design) replace managed/self-hosted data
+  services; the health check runs a trivial SELECT 1 so Supabase never hits its
+  inactivity pause.
+- **LiveKit Cloud Build** (free, no card) replaces self-hosted LiveKit; **Backblaze B2**
+  (free, no card) replaces R2 for evidence - extending D24's ObjectStorage abstraction
+  with a configurable S3 endpoint/region (path-style) is a planned repo change.
+- **UptimeRobot Free** replaces the Uptime Kuma container (there is no server to run it
+  on) and doubles as the keep-alive. DuckDNS remains as an optional custom-domain step.
+- No VM, no Caddy, no ufw, no self-hosted media at launch. The Oracle/VM runbook is
+  parked (DEPLOYMENT.md + git history) as the upgrade path for when a bank card exists;
+  moving to it is an env-swap only (storage provider, LIVEKIT_URL, domain).
+
+**Consequences.** $0/month with no payment method anywhere; Vercel/Render free tiers are
+non-commercial (acceptable for testing/portfolio, must upgrade before charging users);
+hard caps are dashboarded weekly (Render hours, LiveKit minutes, B2 usage) and fail
+cleanly rather than billing. Evidence uploads and reads now flow through Render's
+ephemeral filesystem only as a passthrough (objects live in B2). Dev/test still run
+locally on Docker Compose with MinIO unchanged - D24's provider split is exactly what
+makes the prod switch a configuration change.

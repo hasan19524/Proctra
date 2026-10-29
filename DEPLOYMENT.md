@@ -1,5 +1,11 @@
 # Deployment Guide — Procto
 
+> **Status (D26):** this is the **VM runbook** (Track B — parked until a bank card
+> exists). The chosen zero-cost launch path is the split free-PaaS stack in
+> [LAUNCH_PLAN.md](LAUNCH_PLAN.md) §0.5/§3 (Vercel + Render + Supabase + Upstash +
+> LiveKit Cloud + B2). The env tables and storage/health checklists below stay valid;
+> the Caddy/LiveKit-VM steps will be rewritten into a PaaS runbook at deploy time.
+
 This document describes how to deploy Procto to a production environment.
 
 ## Prerequisites
